@@ -2,6 +2,7 @@
 
 # Go parameters
 GO_FILES := $(shell find . -type f -name '*.go')
+TMPL_FILES := $(shell find . -type f -name '*.tmpl')
 BINARY_NAME := dnmap
 BUILD_DIR := bin
 
@@ -16,12 +17,12 @@ all: clean lint test build ## Run clean, lint, test, and build
 .PHONY: build
 build: $(BUILD_DIR)/$(BINARY_NAME) ## Build the binary
 
-$(BUILD_DIR)/$(BINARY_NAME): $(GO_FILES)
+$(BUILD_DIR)/$(BINARY_NAME): $(GO_FILES) $(TMPL_FILES)
 	@mkdir -p $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/dnmap
 
 .PHONY: run
-run: build ## Build and run the CLI
+run: $(BUILD_DIR)/$(BINARY_NAME) ## Build and run the CLI
 	./$(BUILD_DIR)/$(BINARY_NAME)
 
 .PHONY: clean
