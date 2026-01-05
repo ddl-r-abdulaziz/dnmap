@@ -115,13 +115,13 @@ func TestBuilderBuild(t *testing.T) {
 
 	tests := map[string]struct {
 		workloads     []k8s.Workload
-		policies      []networkingv1.NetworkPolicy
+		policies      []k8s.Policy
 		expectedNodes int
 		expectedEdges int
 	}{
 		"empty inputs": {
 			workloads:     []k8s.Workload{},
-			policies:      []networkingv1.NetworkPolicy{},
+			policies:      []k8s.Policy{},
 			expectedNodes: 0,
 			expectedEdges: 0,
 		},
@@ -137,11 +137,92 @@ func TestBuilderBuild(t *testing.T) {
 					},
 				},
 			},
-			policies:      []networkingv1.NetworkPolicy{},
+			policies:      []k8s.Policy{},
 			expectedNodes: 2, // 1 workload + 1 port
 			expectedEdges: 0,
 		},
-		"workload with policy allowing access": {
+		"workload with k8s network policy allowing access": {
+			workloads: []k8s.Workload{
+				{
+					Name:      "frontend",
+					Namespace: "default",
+					Type:      k8s.WorkloadTypeDeployment,
+					Labels:    map[string]string{"app": "frontend"},
+					Ports:     []k8s.Port{},
+				},
+				{
+					Name:      "backend",
+					Namespace: "default",
+					Type:      k8s.WorkloadTypeDeployment,
+					Labels:    map[string]string{"app": "backend"},
+					Ports: []k8s.Port{
+						{Name: "http", ContainerPort: 8080, Protocol: corev1.ProtocolTCP},
+					},
+				},
+			},
+			policies: []k8s.Policy{
+				{
+					Name:      "allow-frontend",
+					Namespace: "default",
+					Type:      k8s.PolicyTypeK8sNetworkPolicy,
+					K8sNetworkPolicy: &networkingv1.NetworkPolicy{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "allow-frontend",
+							Namespace: "default",
+						},
+						Spec: networkingv1.NetworkPolicySpec{
+							PodSelector: metav1.LabelSelector{
+								MatchLabels: map[string]string{"app": "backend"},
+							},
+							Ingress: []networkingv1.NetworkPolicyIngressRule{
+								{
+									From: []networkingv1.NetworkPolicyPeer{
+										{
+											PodSelector: &metav1.LabelSelector{
+												MatchLabels: map[string]string{"app": "frontend"},
+											},
+										},
+									},
+									Ports: []networkingv1.NetworkPolicyPort{
+										{
+											Port: &intstr.IntOrString{Type: intstr.Int, IntVal: 8080},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedNodes: 3, // 2 workloads + 1 port
+			expectedEdges: 1, // frontend -> backend:8080
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			graph := builder.Build(tt.workloads, tt.policies)
+
+			if len(graph.Nodes) != tt.expectedNodes {
+				t.Errorf("expected %d nodes, got %d", tt.expectedNodes, len(graph.Nodes))
+			}
+			if len(graph.Edges) != tt.expectedEdges {
+				t.Errorf("expected %d edges, got %d", tt.expectedEdges, len(graph.Edges))
+			}
+		})
+	}
+}
+
+func TestBuilderBuildFromNetworkPolicies(t *testing.T) {
+	builder := NewBuilder()
+
+	tests := map[string]struct {
+		workloads     []k8s.Workload
+		policies      []networkingv1.NetworkPolicy
+		expectedNodes int
+		expectedEdges int
+	}{
+		"backwards compatibility test": {
 			workloads: []k8s.Workload{
 				{
 					Name:      "frontend",
@@ -189,14 +270,14 @@ func TestBuilderBuild(t *testing.T) {
 					},
 				},
 			},
-			expectedNodes: 3, // 2 workloads + 1 port
-			expectedEdges: 1, // frontend -> backend:8080
+			expectedNodes: 3,
+			expectedEdges: 1,
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			graph := builder.Build(tt.workloads, tt.policies)
+			graph := builder.BuildFromNetworkPolicies(tt.workloads, tt.policies)
 
 			if len(graph.Nodes) != tt.expectedNodes {
 				t.Errorf("expected %d nodes, got %d", tt.expectedNodes, len(graph.Nodes))
@@ -274,4 +355,3 @@ func TestBuilderPortMatches(t *testing.T) {
 		})
 	}
 }
-

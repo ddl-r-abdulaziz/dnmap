@@ -1,11 +1,12 @@
 # dnmap - Domino Network Map
 
-A CLI tool that generates an interactive visualization of workloads and network policies in your Kubernetes cluster.
+A CLI tool that generates an interactive visualization of workloads and network policies in your Kubernetes cluster. Supports both Kubernetes NetworkPolicies and Istio AuthorizationPolicies.
 
 ## Features
 
 - **Workload Discovery**: Scans Deployments, StatefulSets, and DaemonSets across specified namespaces
-- **Network Policy Analysis**: Parses NetworkPolicy resources to understand allowed traffic flows
+- **Network Policy Analysis**: Parses Kubernetes NetworkPolicy and Istio AuthorizationPolicy resources to understand allowed traffic flows
+- **Unified Policy View**: Combines K8s and Istio policies into a single network graph
 - **Interactive Visualization**: Generates a single-page HTML with:
   - Drag-and-drop nodes
   - Physics-based layout with force-directed graph
@@ -34,6 +35,7 @@ make build
 
 - Go 1.21+
 - Access to a Kubernetes cluster (via kubeconfig)
+- Optional: Istio installed for AuthorizationPolicy support
 
 ## Usage
 
@@ -65,11 +67,12 @@ The tool generates a single HTML file containing an interactive network graph:
 
 - **Nodes** represent workloads (Deployments, StatefulSets, DaemonSets)
 - **Small circles** attached to nodes represent exposed ports
-- **Edges** represent allowed network connections as defined by NetworkPolicies
+- **Edges** represent allowed network connections as defined by NetworkPolicies or AuthorizationPolicies
 - **Tooltips** display detailed information including:
   - Workload type and namespace
   - Labels
-  - The specific NetworkPolicy rule allowing the connection
+  - The specific policy rule allowing the connection
+  - Policy type (NetworkPolicy or AuthorizationPolicy)
 
 ### Color Legend
 
@@ -79,6 +82,20 @@ The tool generates a single HTML file containing an interactive network graph:
 | Purple | StatefulSet |
 | Orange | DaemonSet |
 | Cyan | Port |
+
+## Supported Policies
+
+### Kubernetes NetworkPolicy
+- Pod selectors for target workloads
+- Ingress rules with pod/namespace selectors
+- Port specifications (named and numbered)
+- Protocol specifications (TCP, UDP)
+
+### Istio AuthorizationPolicy
+- Workload selectors
+- Source principals and namespaces
+- Operation ports, methods, and paths
+- ALLOW/DENY actions
 
 ## Development
 
@@ -106,21 +123,22 @@ make help
 
 ```
 dnmap/
-├── cmd/
-│   └── dnmap/
-│       └── main.go          # CLI entry point
+├── cmd/dnmap/
+│   └── main.go                      # CLI entry point
 ├── pkg/
 │   ├── k8s/
-│   │   ├── client.go        # Kubernetes client
+│   │   ├── client.go                # K8s and Istio client
 │   │   └── client_test.go
 │   ├── graph/
-│   │   ├── model.go         # Graph data structures
+│   │   ├── model.go                 # Graph data structures
 │   │   ├── model_test.go
-│   │   ├── builder.go       # Graph construction logic
+│   │   ├── builder.go               # Graph construction from policies
 │   │   └── builder_test.go
 │   └── render/
-│       ├── html.go          # HTML/Canvas renderer
-│       └── html_test.go
+│       ├── html.go                  # HTML/Canvas renderer
+│       ├── html_test.go
+│       └── templates/
+│           └── graph.html.tmpl      # Embedded HTML template
 ├── Makefile
 ├── go.mod
 └── README.md
@@ -129,11 +147,21 @@ dnmap/
 ## How It Works
 
 1. **Discovery**: Connects to your Kubernetes cluster and fetches workloads from the specified namespaces
-2. **Policy Analysis**: Retrieves NetworkPolicy resources and analyzes their rules
-3. **Graph Building**: Creates nodes for each workload and port, then creates edges based on NetworkPolicy ingress rules
-4. **Rendering**: Generates an interactive HTML page with embedded JavaScript for visualization
+2. **Policy Analysis**: Retrieves both K8s NetworkPolicy and Istio AuthorizationPolicy resources
+3. **Graph Building**: 
+   - Creates nodes for each workload and port
+   - Analyzes K8s NetworkPolicy ingress rules to create edges
+   - Analyzes Istio AuthorizationPolicy rules to create edges
+   - Combines all edges with metadata about the originating policy
+4. **Rendering**: Generates an interactive HTML page using embedded Go templates
+
+## API Dependencies
+
+- `k8s.io/api` - Kubernetes API types
+- `k8s.io/client-go` - Kubernetes client library
+- `istio.io/api` - Istio API types
+- `istio.io/client-go` - Istio client library
 
 ## License
 
 MIT License
-

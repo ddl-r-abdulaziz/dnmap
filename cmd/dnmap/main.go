@@ -58,7 +58,7 @@ func run(kubeconfig, outputFile, namespaces string) error {
 	// Parse namespaces
 	nsList := k8s.ParseNamespaces(namespaces)
 
-	// Fetch workloads and network policies
+	// Fetch workloads and policies
 	fmt.Printf("Scanning namespaces: %v\n", nsList)
 
 	workloads, err := client.GetWorkloads(nsList)
@@ -67,11 +67,22 @@ func run(kubeconfig, outputFile, namespaces string) error {
 	}
 	fmt.Printf("Found %d workloads\n", len(workloads))
 
-	policies, err := client.GetNetworkPolicies(nsList)
+	policies, err := client.GetPolicies(nsList)
 	if err != nil {
-		return fmt.Errorf("failed to get network policies: %w", err)
+		return fmt.Errorf("failed to get policies: %w", err)
 	}
-	fmt.Printf("Found %d network policies\n", len(policies))
+
+	// Count policy types
+	var k8sPolicies, istioPolicies int
+	for _, p := range policies {
+		switch p.Type {
+		case k8s.PolicyTypeK8sNetworkPolicy:
+			k8sPolicies++
+		case k8s.PolicyTypeIstioAuthorizationPolicy:
+			istioPolicies++
+		}
+	}
+	fmt.Printf("Found %d K8s NetworkPolicies, %d Istio AuthorizationPolicies\n", k8sPolicies, istioPolicies)
 
 	// Build the graph
 	builder := graph.NewBuilder()
@@ -79,7 +90,10 @@ func run(kubeconfig, outputFile, namespaces string) error {
 	fmt.Printf("Generated graph with %d nodes and %d edges\n", len(networkGraph.Nodes), len(networkGraph.Edges))
 
 	// Render to HTML
-	renderer := render.NewHTMLRenderer()
+	renderer, err := render.NewHTMLRenderer()
+	if err != nil {
+		return fmt.Errorf("failed to create renderer: %w", err)
+	}
 	html, err := renderer.Render(networkGraph)
 	if err != nil {
 		return fmt.Errorf("failed to render graph: %w", err)
@@ -93,4 +107,3 @@ func run(kubeconfig, outputFile, namespaces string) error {
 	fmt.Printf("Network map written to: %s\n", outputFile)
 	return nil
 }
-

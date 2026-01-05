@@ -17,17 +17,17 @@ func NewBuilder() *Builder {
 	return &Builder{}
 }
 
-// Build constructs a NetworkGraph from workloads and network policies.
-func (b *Builder) Build(workloads []k8s.Workload, policies []networkingv1.NetworkPolicy) *NetworkGraph {
+// Build constructs a NetworkGraph from workloads and policies.
+func (b *Builder) Build(workloads []k8s.Workload, policies []k8s.Policy) *NetworkGraph {
 	graph := &NetworkGraph{
 		Nodes: make([]Node, 0),
 		Edges: make([]Edge, 0),
 	}
 
 	// Build maps for quick lookup
-	workloadMap := make(map[string]k8s.Workload)      // workloadID -> Workload
-	workloadsByNS := make(map[string][]k8s.Workload)  // namespace -> []Workload
-	portNodes := make(map[string]Node)                // portID -> Node
+	workloadMap := make(map[string]k8s.Workload)     // workloadID -> Workload
+	workloadsByNS := make(map[string][]k8s.Workload) // namespace -> []Workload
+	portNodes := make(map[string]Node)               // portID -> Node
 
 	// Create nodes for each workload and its ports
 	for _, w := range workloads {
@@ -46,60 +46,355 @@ func (b *Builder) Build(workloads []k8s.Workload, policies []networkingv1.Networ
 		}
 	}
 
-	// Process network policies to create edges
+	// Process policies to create edges
 	edgeID := 0
 	for _, policy := range policies {
-		// Find workloads that this policy applies to (targets)
-		targetWorkloads := b.findMatchingWorkloads(policy.Namespace, policy.Spec.PodSelector, workloadsByNS)
+		switch policy.Type {
+		case k8s.PolicyTypeK8sNetworkPolicy:
+			if policy.K8sNetworkPolicy != nil {
+				edges := b.processK8sNetworkPolicy(policy.K8sNetworkPolicy, workloadsByNS, &edgeID)
+				graph.Edges = append(graph.Edges, edges...)
+			}
+		case k8s.PolicyTypeIstioAuthorizationPolicy:
+			if policy.IstioAuthPolicy != nil {
+				edges := b.processIstioAuthPolicy(policy.IstioAuthPolicy, workloadsByNS, &edgeID)
+				graph.Edges = append(graph.Edges, edges...)
+			}
+		}
+	}
 
-		// Process ingress rules
-		for ruleIdx, ingressRule := range policy.Spec.Ingress {
-			// Find source workloads allowed by this rule
-			sourceWorkloads := b.findSourceWorkloads(policy.Namespace, ingressRule.From, workloadsByNS)
+	return graph
+}
 
-			// For each target workload
-			for _, targetW := range targetWorkloads {
-				targetWID := WorkloadID(targetW.Namespace, targetW.Name)
+// BuildFromNetworkPolicies constructs a NetworkGraph using only K8s NetworkPolicies.
+// This is for backwards compatibility.
+func (b *Builder) BuildFromNetworkPolicies(workloads []k8s.Workload, netPolicies []networkingv1.NetworkPolicy) *NetworkGraph {
+	policies := make([]k8s.Policy, 0, len(netPolicies))
+	for i := range netPolicies {
+		policies = append(policies, k8s.Policy{
+			Name:             netPolicies[i].Name,
+			Namespace:        netPolicies[i].Namespace,
+			Type:             k8s.PolicyTypeK8sNetworkPolicy,
+			K8sNetworkPolicy: &netPolicies[i],
+		})
+	}
+	return b.Build(workloads, policies)
+}
 
-				// Determine which ports are allowed
-				allowedPorts := b.getAllowedPorts(targetW, ingressRule.Ports)
+// processK8sNetworkPolicy processes a K8s NetworkPolicy and returns edges.
+func (b *Builder) processK8sNetworkPolicy(policy *networkingv1.NetworkPolicy, workloadsByNS map[string][]k8s.Workload, edgeID *int) []Edge {
+	var edges []Edge
 
-				// Create edges from each source to each allowed port
-				for _, sourceW := range sourceWorkloads {
-					sourceWID := WorkloadID(sourceW.Namespace, sourceW.Name)
+	// Find workloads that this policy applies to (targets)
+	targetWorkloads := b.findMatchingWorkloads(policy.Namespace, policy.Spec.PodSelector, workloadsByNS)
 
-					// Don't create self-referencing edges
-					if sourceWID == targetWID {
-						continue
+	// Process ingress rules
+	for ruleIdx, ingressRule := range policy.Spec.Ingress {
+		// Find source workloads allowed by this rule
+		sourceWorkloads := b.findSourceWorkloads(policy.Namespace, ingressRule.From, workloadsByNS)
+
+		// For each target workload
+		for _, targetW := range targetWorkloads {
+			targetWID := WorkloadID(targetW.Namespace, targetW.Name)
+
+			// Determine which ports are allowed
+			allowedPorts := b.getAllowedPorts(targetW, ingressRule.Ports)
+
+			// Create edges from each source to each allowed port
+			for _, sourceW := range sourceWorkloads {
+				sourceWID := WorkloadID(sourceW.Namespace, sourceW.Name)
+
+				// Don't create self-referencing edges
+				if sourceWID == targetWID {
+					continue
+				}
+
+				for _, port := range allowedPorts {
+					protocol := string(port.Protocol)
+					if protocol == "" {
+						protocol = "TCP"
 					}
+					portID := PortID(targetWID, port.ContainerPort, protocol)
 
-					for _, port := range allowedPorts {
-						protocol := string(port.Protocol)
-						if protocol == "" {
-							protocol = "TCP"
-						}
-						portID := PortID(targetWID, port.ContainerPort, protocol)
+					edge := Edge{
+						ID:     fmt.Sprintf("edge-%d", *edgeID),
+						Source: sourceWID,
+						Target: portID,
+						Label:  fmt.Sprintf("%s:%d", protocol, port.ContainerPort),
+						Rule:   b.formatK8sRule(ingressRule, ruleIdx),
+						Policy: policy.Namespace + "/" + policy.Name,
+						Metadata: map[string]string{
+							"policyType": "NetworkPolicy",
+							"ruleType":   "ingress",
+						},
+					}
+					edges = append(edges, edge)
+					*edgeID++
+				}
+			}
+		}
+	}
 
-						edge := Edge{
-							ID:     fmt.Sprintf("edge-%d", edgeID),
-							Source: sourceWID,
-							Target: portID,
-							Label:  fmt.Sprintf("%s:%d", protocol, port.ContainerPort),
-							Rule:   b.formatRule(ingressRule, ruleIdx),
-							Policy: policy.Namespace + "/" + policy.Name,
-							Metadata: map[string]string{
-								"ruleType": "ingress",
-							},
+	return edges
+}
+
+// processIstioAuthPolicy processes an Istio AuthorizationPolicy and returns edges.
+func (b *Builder) processIstioAuthPolicy(policy *k8s.IstioAuthorizationPolicy, workloadsByNS map[string][]k8s.Workload, edgeID *int) []Edge {
+	var edges []Edge
+
+	if policy == nil {
+		return edges
+	}
+
+	// Find workloads that this policy applies to using the selector
+	var targetWorkloads []k8s.Workload
+	if policy.Spec.GetSelector() != nil && len(policy.Spec.GetSelector().GetMatchLabels()) > 0 {
+		targetWorkloads = b.findWorkloadsByLabels(policy.Namespace, policy.Spec.GetSelector().GetMatchLabels(), workloadsByNS)
+	} else {
+		// No selector means all workloads in the namespace
+		targetWorkloads = workloadsByNS[policy.Namespace]
+	}
+
+	// Process rules
+	for ruleIdx, rule := range policy.Spec.GetRules() {
+		if rule == nil {
+			continue
+		}
+
+		// Find source workloads from the 'from' section
+		sourceWorkloads := b.findIstioSourceWorkloads(policy.Namespace, rule.GetFrom(), workloadsByNS)
+
+		// Get operations (ports) from the 'to' section
+		allowedPorts := b.getIstioAllowedPorts(rule.GetTo())
+
+		// For each target workload
+		for _, targetW := range targetWorkloads {
+			targetWID := WorkloadID(targetW.Namespace, targetW.Name)
+
+			// If no specific ports in the rule, use all ports of the workload
+			targetPorts := allowedPorts
+			if len(targetPorts) == 0 {
+				for _, p := range targetW.Ports {
+					targetPorts = append(targetPorts, int(p.ContainerPort))
+				}
+			}
+
+			// Create edges from each source to each allowed port
+			for _, sourceW := range sourceWorkloads {
+				sourceWID := WorkloadID(sourceW.Namespace, sourceW.Name)
+
+				// Don't create self-referencing edges
+				if sourceWID == targetWID {
+					continue
+				}
+
+				for _, port := range targetPorts {
+					protocol := "TCP" // Istio primarily uses TCP
+					portID := PortID(targetWID, int32(port), protocol)
+
+					edge := Edge{
+						ID:     fmt.Sprintf("edge-%d", *edgeID),
+						Source: sourceWID,
+						Target: portID,
+						Label:  fmt.Sprintf("%s:%d", protocol, port),
+						Rule:   b.formatIstioRule(rule, ruleIdx),
+						Policy: policy.Namespace + "/" + policy.Name,
+					Metadata: map[string]string{
+						"policyType": "AuthorizationPolicy",
+						"action":     policy.Spec.GetAction().String(),
+					},
+					}
+					edges = append(edges, edge)
+					*edgeID++
+				}
+			}
+		}
+	}
+
+	return edges
+}
+
+// findWorkloadsByLabels finds workloads that match the given labels.
+func (b *Builder) findWorkloadsByLabels(namespace string, labels map[string]string, workloadsByNS map[string][]k8s.Workload) []k8s.Workload {
+	var result []k8s.Workload
+	workloads := workloadsByNS[namespace]
+
+	for _, w := range workloads {
+		if b.labelsMatch(w.Labels, labels) {
+			result = append(result, w)
+		}
+	}
+	return result
+}
+
+// labelsMatch checks if workload labels contain all the required labels.
+func (b *Builder) labelsMatch(workloadLabels, requiredLabels map[string]string) bool {
+	for key, value := range requiredLabels {
+		if workloadLabels[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+// findIstioSourceWorkloads finds workloads allowed by Istio 'from' rules.
+func (b *Builder) findIstioSourceWorkloads(policyNamespace string, from []*k8s.IstioSource, workloadsByNS map[string][]k8s.Workload) []k8s.Workload {
+	var result []k8s.Workload
+	seen := make(map[string]bool)
+
+	// If 'from' is empty, all sources are allowed (ALLOW action)
+	if len(from) == 0 {
+		for _, workloads := range workloadsByNS {
+			for _, w := range workloads {
+				wID := WorkloadID(w.Namespace, w.Name)
+				if !seen[wID] {
+					result = append(result, w)
+					seen[wID] = true
+				}
+			}
+		}
+		return result
+	}
+
+	for _, f := range from {
+		if f == nil || f.GetSource() == nil {
+			continue
+		}
+
+		source := f.GetSource()
+
+		// Check principals (service accounts)
+		if len(source.GetPrincipals()) > 0 {
+			// Principals are in the format: cluster.local/ns/<namespace>/sa/<serviceaccount>
+			// For simplicity, we match workloads in namespaces mentioned in principals
+			for _, principal := range source.GetPrincipals() {
+				ns := extractNamespaceFromPrincipal(principal)
+				if ns != "" {
+					for _, w := range workloadsByNS[ns] {
+						wID := WorkloadID(w.Namespace, w.Name)
+						if !seen[wID] {
+							result = append(result, w)
+							seen[wID] = true
 						}
-						graph.Edges = append(graph.Edges, edge)
-						edgeID++
+					}
+				}
+			}
+		}
+
+		// Check namespaces
+		if len(source.GetNamespaces()) > 0 {
+			for _, ns := range source.GetNamespaces() {
+				for _, w := range workloadsByNS[ns] {
+					wID := WorkloadID(w.Namespace, w.Name)
+					if !seen[wID] {
+						result = append(result, w)
+						seen[wID] = true
+					}
+				}
+			}
+		}
+
+		// If no specific principals or namespaces, check all workloads
+		if len(source.GetPrincipals()) == 0 && len(source.GetNamespaces()) == 0 {
+			for _, workloads := range workloadsByNS {
+				for _, w := range workloads {
+					wID := WorkloadID(w.Namespace, w.Name)
+					if !seen[wID] {
+						result = append(result, w)
+						seen[wID] = true
 					}
 				}
 			}
 		}
 	}
 
-	return graph
+	return result
+}
+
+// extractNamespaceFromPrincipal extracts namespace from an Istio principal.
+func extractNamespaceFromPrincipal(principal string) string {
+	// Format: cluster.local/ns/<namespace>/sa/<serviceaccount>
+	parts := strings.Split(principal, "/")
+	for i, part := range parts {
+		if part == "ns" && i+1 < len(parts) {
+			return parts[i+1]
+		}
+	}
+	return ""
+}
+
+// getIstioAllowedPorts extracts allowed ports from Istio 'to' operations.
+func (b *Builder) getIstioAllowedPorts(to []*k8s.IstioOperation) []int {
+	var ports []int
+	seen := make(map[int]bool)
+
+	for _, t := range to {
+		if t == nil || t.GetOperation() == nil {
+			continue
+		}
+		for _, portStr := range t.GetOperation().GetPorts() {
+			port := 0
+			fmt.Sscanf(portStr, "%d", &port)
+			if port > 0 && !seen[port] {
+				ports = append(ports, port)
+				seen[port] = true
+			}
+		}
+	}
+
+	return ports
+}
+
+// formatIstioRule creates a human-readable description of an Istio rule.
+func (b *Builder) formatIstioRule(rule *k8s.IstioRule, idx int) string {
+	var parts []string
+
+	// Describe sources
+	if len(rule.GetFrom()) == 0 {
+		parts = append(parts, "from: all")
+	} else {
+		var sources []string
+		for _, f := range rule.GetFrom() {
+			if f != nil && f.GetSource() != nil {
+				source := f.GetSource()
+				if len(source.GetPrincipals()) > 0 {
+					sources = append(sources, fmt.Sprintf("principals: %v", source.GetPrincipals()))
+				}
+				if len(source.GetNamespaces()) > 0 {
+					sources = append(sources, fmt.Sprintf("namespaces: %v", source.GetNamespaces()))
+				}
+			}
+		}
+		if len(sources) > 0 {
+			parts = append(parts, "from: "+strings.Join(sources, ", "))
+		}
+	}
+
+	// Describe operations
+	if len(rule.GetTo()) == 0 {
+		parts = append(parts, "to: all")
+	} else {
+		var ops []string
+		for _, t := range rule.GetTo() {
+			if t != nil && t.GetOperation() != nil {
+				op := t.GetOperation()
+				if len(op.GetPorts()) > 0 {
+					ops = append(ops, fmt.Sprintf("ports: %v", op.GetPorts()))
+				}
+				if len(op.GetMethods()) > 0 {
+					ops = append(ops, fmt.Sprintf("methods: %v", op.GetMethods()))
+				}
+				if len(op.GetPaths()) > 0 {
+					ops = append(ops, fmt.Sprintf("paths: %v", op.GetPaths()))
+				}
+			}
+		}
+		if len(ops) > 0 {
+			parts = append(parts, "to: "+strings.Join(ops, ", "))
+		}
+	}
+
+	return fmt.Sprintf("AuthzPolicy Rule %d: %s", idx+1, strings.Join(parts, "; "))
 }
 
 // findMatchingWorkloads finds workloads that match the given label selector in the specified namespace.
@@ -278,8 +573,8 @@ func (b *Builder) portMatches(wPort k8s.Port, pPort networkingv1.NetworkPolicyPo
 	return true
 }
 
-// formatRule creates a human-readable description of an ingress rule.
-func (b *Builder) formatRule(rule networkingv1.NetworkPolicyIngressRule, idx int) string {
+// formatK8sRule creates a human-readable description of a K8s NetworkPolicy ingress rule.
+func (b *Builder) formatK8sRule(rule networkingv1.NetworkPolicyIngressRule, idx int) string {
 	var parts []string
 
 	// Describe sources
@@ -304,7 +599,7 @@ func (b *Builder) formatRule(rule networkingv1.NetworkPolicyIngressRule, idx int
 		parts = append(parts, "ports: "+strings.Join(ports, ", "))
 	}
 
-	return fmt.Sprintf("Ingress Rule %d: %s", idx+1, strings.Join(parts, "; "))
+	return fmt.Sprintf("NetworkPolicy Rule %d: %s", idx+1, strings.Join(parts, "; "))
 }
 
 // formatPeer creates a human-readable description of a NetworkPolicyPeer.
@@ -353,4 +648,3 @@ func (b *Builder) formatPolicyPort(p networkingv1.NetworkPolicyPort) string {
 	}
 	return fmt.Sprintf("%s/%s", protocol, p.Port.StrVal)
 }
-

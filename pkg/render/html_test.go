@@ -8,7 +8,10 @@ import (
 )
 
 func TestHTMLRendererRender(t *testing.T) {
-	renderer := NewHTMLRenderer()
+	renderer, err := NewHTMLRenderer()
+	if err != nil {
+		t.Fatalf("failed to create renderer: %v", err)
+	}
 
 	tests := map[string]struct {
 		graph           *graph.NetworkGraph
@@ -94,4 +97,3 @@ func TestHTMLRendererRender(t *testing.T) {
 		})
 	}
 }
-
