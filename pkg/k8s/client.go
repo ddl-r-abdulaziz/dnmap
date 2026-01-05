@@ -72,23 +72,51 @@ type Client struct {
 	istioClientset istioclient.Interface
 }
 
-// NewClient creates a new Kubernetes and Istio client using the provided kubeconfig path.
-// If kubeconfig is empty, it attempts to use in-cluster config.
+// NewClient creates a new Kubernetes and Istio client.
+// It uses the standard kubectl config loading rules:
+// 1. If kubeconfig is provided, use that file
+// 2. Otherwise, check KUBECONFIG environment variable
+// 3. Fall back to ~/.kube/config
+// 4. If running in-cluster, use the service account token
+// The currently selected context in the kubeconfig is used.
 func NewClient(kubeconfig string) (*Client, error) {
 	var config *rest.Config
 	var err error
 
-	if kubeconfig == "" {
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create in-cluster config: %w", err)
+	// First, try in-cluster config (for when running inside a pod)
+	config, err = rest.InClusterConfig()
+	if err == nil {
+		// We're running in-cluster, use that config
+		goto createClients
+	}
+
+	// Not in-cluster, try kubeconfig (respects current context)
+	{
+		loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+		if kubeconfig != "" {
+			loadingRules.ExplicitPath = kubeconfig
 		}
-	} else {
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+
+		configOverrides := &clientcmd.ConfigOverrides{}
+		kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+
+		// Get the raw config to check what's happening
+		rawConfig, rawErr := kubeConfig.RawConfig()
+		if rawErr != nil {
+			return nil, fmt.Errorf("failed to load kubeconfig: %w", rawErr)
+		}
+
+		if rawConfig.CurrentContext == "" {
+			return nil, fmt.Errorf("no current context set in kubeconfig; run 'kubectl config use-context <context>' to set one")
+		}
+
+		config, err = kubeConfig.ClientConfig()
 		if err != nil {
-			return nil, fmt.Errorf("failed to build config from kubeconfig: %w", err)
+			return nil, fmt.Errorf("failed to create client config from kubeconfig (current-context: %s): %w", rawConfig.CurrentContext, err)
 		}
 	}
+
+createClients:
 
 	k8sClientset, err := kubernetes.NewForConfig(config)
 	if err != nil {

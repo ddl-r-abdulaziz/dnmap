@@ -5,12 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/ddl-r-abdulaziz/dnmap/pkg/graph"
 	"github.com/ddl-r-abdulaziz/dnmap/pkg/k8s"
 	"github.com/ddl-r-abdulaziz/dnmap/pkg/render"
-	"k8s.io/client-go/util/homedir"
 )
 
 const (
@@ -23,11 +21,9 @@ func main() {
 	var namespaces string
 
 	// Set up flags
-	if home := homedir.HomeDir(); home != "" {
-		flag.StringVar(&kubeconfig, "kubeconfig", filepath.Join(home, ".kube", "config"), "path to the kubeconfig file")
-	} else {
-		flag.StringVar(&kubeconfig, "kubeconfig", "", "path to the kubeconfig file")
-	}
+	// Don't set a default kubeconfig path - let the client use standard kubectl loading rules
+	// which respect KUBECONFIG env var and fall back to ~/.kube/config
+	flag.StringVar(&kubeconfig, "kubeconfig", "", "path to the kubeconfig file (default: uses KUBECONFIG env or ~/.kube/config)")
 	flag.StringVar(&outputFile, "output", defaultOutputFile, "output HTML file path")
 	flag.StringVar(&namespaces, "namespaces", "domino-compute,domino-platform", "comma-separated list of namespaces to scan")
 
