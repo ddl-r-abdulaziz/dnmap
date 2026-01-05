@@ -386,7 +386,10 @@
     </div>
     
     <script>
+    try {
+    console.log('dnmap: script starting');
     const graphData = {{.GraphData}};
+    console.log('dnmap: graphData loaded, nodes:', graphData.nodes?.length, 'edges:', graphData.edges?.length);
     
     // Canvas setup
     const canvas = document.getElementById('canvas');
@@ -398,15 +401,16 @@
     let width, height;
     let dpr = window.devicePixelRatio || 1;
     
-    // View state
-    let panX = 0, panY = 0;
+    // View state (ensure initial values are always valid numbers)
+    let panX = 0;
+    let panY = 0;
     let zoom = 1;
     let isDragging = false;
     let isPanning = false;
     let dragNode = null;
     let dragOffsetX = 0, dragOffsetY = 0;
     let lastMouseX = 0, lastMouseY = 0;
-    let physicsEnabled = true;
+    let physicsEnabled = false; // Start with physics disabled to debug
     
     // Colors
     const colors = {
@@ -423,13 +427,18 @@
     class GraphNode {
         constructor(data) {
             this.data = data;
-            this.x = Math.random() * 800 - 400;
-            this.y = Math.random() * 600 - 300;
+            this.x = (Math.random() * 800 - 400) || 0;
+            this.y = (Math.random() * 600 - 300) || 0;
             this.vx = 0;
             this.vy = 0;
             this.radius = data.type === 'port' ? 8 : 24;
             this.fixed = false;
         }
+    }
+    
+    // Helper to check if a number is finite
+    function isFiniteNum(n) {
+        return typeof n === 'number' && isFinite(n);
     }
     
     // Initialize nodes
@@ -450,9 +459,13 @@
     // Position port nodes relative to their parents
     portNodes.forEach(portNode => {
         const parent = nodes.get(portNode.data.parent);
-        if (parent) {
+        if (parent && isFiniteNum(parent.x) && isFiniteNum(parent.y)) {
             portNode.x = parent.x + (Math.random() - 0.5) * 60;
             portNode.y = parent.y + (Math.random() - 0.5) * 60;
+        } else {
+            // Fallback to origin if parent not found or invalid
+            portNode.x = (Math.random() - 0.5) * 100;
+            portNode.y = (Math.random() - 0.5) * 100;
         }
     });
     
@@ -467,19 +480,33 @@
     document.getElementById('node-count').textContent = workloadNodes.length;
     document.getElementById('edge-count').textContent = edges.length;
     
+    // Debug logging
+    console.log('dnmap: loaded', workloadNodes.length, 'workloads,', portNodes.length, 'ports,', edges.length, 'edges');
+    if (workloadNodes.length > 0) {
+        console.log('dnmap: first workload position:', workloadNodes[0].x, workloadNodes[0].y);
+    }
+    
     function resize() {
         const rect = canvas.parentElement.getBoundingClientRect();
-        width = rect.width;
-        height = rect.height;
+        width = rect.width || 800;
+        height = rect.height || 600;
+        
+        // Ensure dimensions are valid
+        if (!isFiniteNum(width) || width <= 0) width = 800;
+        if (!isFiniteNum(height) || height <= 0) height = 600;
         
         canvas.width = width * dpr;
         canvas.height = height * dpr;
         canvas.style.width = width + 'px';
         canvas.style.height = height + 'px';
+        
+        // Reset transform before scaling (fixes compounding scale issue)
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.scale(dpr, dpr);
         
         minimapCanvas.width = 180 * dpr;
         minimapCanvas.height = 120 * dpr;
+        minimapCtx.setTransform(1, 0, 0, 1, 0, 0);
         minimapCtx.scale(dpr, dpr);
         
         // Center view if first resize
@@ -487,12 +514,16 @@
             panX = width / 2;
             panY = height / 2;
         }
+        
+        console.log('dnmap resize: width=', width, 'height=', height, 'dpr=', dpr);
     }
     
     function worldToScreen(x, y) {
+        const sx = (x || 0) * (zoom || 1) + (panX || 0);
+        const sy = (y || 0) * (zoom || 1) + (panY || 0);
         return {
-            x: x * zoom + panX,
-            y: y * zoom + panY
+            x: isFiniteNum(sx) ? sx : 0,
+            y: isFiniteNum(sy) ? sy : 0
         };
     }
     
@@ -506,10 +537,12 @@
     function applyPhysics() {
         if (!physicsEnabled) return;
         
-        const damping = 0.85;
-        const repulsion = 5000;
-        const attraction = 0.01;
-        const centerForce = 0.001;
+        const damping = 0.9;
+        const repulsion = 2000;
+        const attraction = 0.005;
+        const centerForce = 0.0005;
+        const maxVelocity = 50;
+        const minDist = 50; // Minimum distance to prevent extreme forces
         
         // Repulsion between workload nodes
         for (let i = 0; i < workloadNodes.length; i++) {
@@ -519,8 +552,14 @@
                 
                 let dx = b.x - a.x;
                 let dy = b.y - a.y;
-                let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                let dist = Math.sqrt(dx * dx + dy * dy);
+                
+                // Clamp minimum distance to prevent extreme forces
+                if (dist < minDist) dist = minDist;
+                
                 let force = repulsion / (dist * dist);
+                // Clamp force
+                force = Math.min(force, 10);
                 
                 let fx = (dx / dist) * force;
                 let fy = (dy / dist) * force;
@@ -539,11 +578,11 @@
             if (source && parent) {
                 let dx = parent.x - source.x;
                 let dy = parent.y - source.y;
-                let dist = Math.sqrt(dx * dx + dy * dy);
-                let force = dist * attraction;
+                let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                let force = Math.min(dist * attraction, 5); // Clamp attraction force
                 
-                if (!source.fixed) { source.vx += dx * force; source.vy += dy * force; }
-                if (!parent.fixed) { parent.vx -= dx * force; parent.vy -= dy * force; }
+                if (!source.fixed) { source.vx += (dx / dist) * force; source.vy += (dy / dist) * force; }
+                if (!parent.fixed) { parent.vx -= (dx / dist) * force; parent.vy -= (dy / dist) * force; }
             }
         });
         
@@ -555,13 +594,29 @@
             }
         });
         
-        // Apply velocity
+        // Apply velocity with clamping
         workloadNodes.forEach(node => {
             if (!node.fixed) {
                 node.vx *= damping;
                 node.vy *= damping;
-                node.x += node.vx;
-                node.y += node.vy;
+                
+                // Clamp velocity to prevent explosion
+                node.vx = Math.max(-maxVelocity, Math.min(maxVelocity, node.vx));
+                node.vy = Math.max(-maxVelocity, Math.min(maxVelocity, node.vy));
+                
+                // Only update position if velocity is finite
+                if (isFiniteNum(node.vx) && isFiniteNum(node.vy)) {
+                    node.x += node.vx;
+                    node.y += node.vy;
+                } else {
+                    // Reset velocity if it became invalid
+                    node.vx = 0;
+                    node.vy = 0;
+                }
+                
+                // Clamp position to prevent nodes from going too far
+                node.x = Math.max(-5000, Math.min(5000, node.x));
+                node.y = Math.max(-5000, Math.min(5000, node.y));
             }
         });
         
@@ -590,7 +645,23 @@
     let hoveredEdge = null;
     let searchTerm = '';
     
+    let frameCount = 0;
     function draw() {
+        frameCount++;
+        
+        // Log every 60 frames (about once per second)
+        if (frameCount % 60 === 1) {
+            const validNodes = workloadNodes.filter(n => isFiniteNum(n.x) && isFiniteNum(n.y)).length;
+            console.log('dnmap frame', frameCount, ': validNodes=', validNodes, '/', workloadNodes.length, 
+                        'panX=', panX, 'panY=', panY, 'zoom=', zoom);
+            if (workloadNodes.length > 0) {
+                const n = workloadNodes[0];
+                const s = worldToScreen(n.x, n.y);
+                console.log('  node0: world=', n.x.toFixed(1), n.y.toFixed(1), 
+                            'screen=', s.x.toFixed(1), s.y.toFixed(1));
+            }
+        }
+        
         ctx.clearRect(0, 0, width, height);
         
         // Draw grid
@@ -616,8 +687,17 @@
             const source = edge.sourceNode;
             const target = edge.targetNode;
             
+            // Skip if source or target nodes are invalid
+            if (!source || !target) return;
+            if (!isFiniteNum(source.x) || !isFiniteNum(source.y)) return;
+            if (!isFiniteNum(target.x) || !isFiniteNum(target.y)) return;
+            
             const start = worldToScreen(source.x, source.y);
             const end = worldToScreen(target.x, target.y);
+            
+            // Skip if screen coordinates are invalid
+            if (!isFiniteNum(start.x) || !isFiniteNum(start.y)) return;
+            if (!isFiniteNum(end.x) || !isFiniteNum(end.y)) return;
             
             const isHovered = hoveredEdge === edge;
             const opacity = isHovered ? 1 : 0.4;
@@ -628,10 +708,13 @@
             const midY = (start.y + end.y) / 2;
             const dx = end.x - start.x;
             const dy = end.y - start.y;
-            const len = Math.sqrt(dx * dx + dy * dy);
+            const len = Math.sqrt(dx * dx + dy * dy) || 1; // Avoid division by zero
             const offset = len * 0.15;
             const ctrlX = midX - dy / len * offset;
             const ctrlY = midY + dx / len * offset;
+            
+            // Skip if control point is invalid
+            if (!isFiniteNum(ctrlX) || !isFiniteNum(ctrlY)) return;
             
             ctx.moveTo(start.x, start.y);
             ctx.quadraticCurveTo(ctrlX, ctrlY, end.x, end.y);
@@ -648,6 +731,8 @@
             const tangentY = 2*(1-t)*(ctrlY-start.y) + 2*t*(end.y-ctrlY);
             const angle = Math.atan2(tangentY, tangentX);
             
+            if (!isFiniteNum(ax) || !isFiniteNum(ay) || !isFiniteNum(angle)) return;
+            
             ctx.beginPath();
             ctx.moveTo(ax, ay);
             ctx.lineTo(ax - arrowSize * Math.cos(angle - Math.PI/6), ay - arrowSize * Math.sin(angle - Math.PI/6));
@@ -660,29 +745,51 @@
         // Draw port-to-parent connections
         portNodes.forEach(portNode => {
             const parent = nodes.get(portNode.data.parent);
-            if (parent) {
-                const pScreen = worldToScreen(parent.x, parent.y);
-                const portScreen = worldToScreen(portNode.x, portNode.y);
-                
-                ctx.beginPath();
-                ctx.moveTo(pScreen.x, pScreen.y);
-                ctx.lineTo(portScreen.x, portScreen.y);
-                ctx.strokeStyle = 'rgba(57, 186, 230, 0.2)';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-            }
+            if (!parent) return;
+            if (!isFiniteNum(parent.x) || !isFiniteNum(parent.y)) return;
+            if (!isFiniteNum(portNode.x) || !isFiniteNum(portNode.y)) return;
+            
+            const pScreen = worldToScreen(parent.x, parent.y);
+            const portScreen = worldToScreen(portNode.x, portNode.y);
+            
+            if (!isFiniteNum(pScreen.x) || !isFiniteNum(pScreen.y)) return;
+            if (!isFiniteNum(portScreen.x) || !isFiniteNum(portScreen.y)) return;
+            
+            ctx.beginPath();
+            ctx.moveTo(pScreen.x, pScreen.y);
+            ctx.lineTo(portScreen.x, portScreen.y);
+            ctx.strokeStyle = 'rgba(57, 186, 230, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
         });
         
         // Draw nodes
         const allNodes = [...workloadNodes, ...portNodes];
         allNodes.forEach(node => {
+            // Skip nodes with invalid positions
+            if (!isFiniteNum(node.x) || !isFiniteNum(node.y)) {
+                return;
+            }
+            
             const screen = worldToScreen(node.x, node.y);
+            
+            // Skip if screen coordinates are not finite
+            if (!isFiniteNum(screen.x) || !isFiniteNum(screen.y)) {
+                return;
+            }
+            
             const isHovered = hoveredNode === node;
-            const isSearchMatch = searchTerm && node.data.label.toLowerCase().includes(searchTerm.toLowerCase());
+            const isSearchMatch = searchTerm && node.data.label && node.data.label.toLowerCase().includes(searchTerm.toLowerCase());
             const isWorkload = node.data.type === 'workload';
             
-            const radius = node.radius * zoom;
-            const color = isWorkload ? colors[node.data.kind] : colors.port;
+            const radius = (node.radius || 8) * (zoom || 1);
+            
+            // Skip if radius is invalid
+            if (!isFiniteNum(radius) || radius <= 0) {
+                return;
+            }
+            
+            const color = isWorkload ? (colors[node.data.kind] || colors.Deployment) : colors.port;
             
             // Glow effect
             if (isHovered || isSearchMatch) {
@@ -720,7 +827,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 
-                const label = node.data.label;
+                const label = node.data.label || '';
                 const maxLen = 12;
                 const displayLabel = label.length > maxLen ? label.slice(0, maxLen) + '…' : label;
                 
@@ -731,7 +838,7 @@
                     ctx.fillText(displayLabel, screen.x - 0.5, screen.y - 0.5);
                 } else {
                     ctx.fillStyle = color;
-                    ctx.fillText(node.data.port, screen.x, screen.y);
+                    ctx.fillText(node.data.port || '', screen.x, screen.y);
                 }
             }
             
@@ -739,7 +846,7 @@
             if (isWorkload && zoom > 0.6) {
                 ctx.font = '500 ' + Math.max(8, 9 * zoom) + 'px JetBrains Mono';
                 ctx.fillStyle = 'rgba(98, 106, 115, 0.8)';
-                ctx.fillText(node.data.namespace, screen.x, screen.y + radius + 12 * zoom);
+                ctx.fillText(node.data.namespace || '', screen.x, screen.y + radius + 12 * zoom);
             }
         });
         
@@ -766,33 +873,57 @@
         minimapCtx.fillStyle = 'rgba(18, 24, 32, 0.9)';
         minimapCtx.fillRect(0, 0, 180, 120);
         
-        // Find bounds
+        // Skip if no workload nodes
+        if (workloadNodes.length === 0) {
+            return;
+        }
+        
+        // Find bounds (only from valid nodes)
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        let validNodes = 0;
         workloadNodes.forEach(n => {
-            minX = Math.min(minX, n.x);
-            maxX = Math.max(maxX, n.x);
-            minY = Math.min(minY, n.y);
-            maxY = Math.max(maxY, n.y);
+            if (isFiniteNum(n.x) && isFiniteNum(n.y)) {
+                minX = Math.min(minX, n.x);
+                maxX = Math.max(maxX, n.x);
+                minY = Math.min(minY, n.y);
+                maxY = Math.max(maxY, n.y);
+                validNodes++;
+            }
         });
+        
+        // Skip if no valid nodes
+        if (validNodes === 0 || !isFiniteNum(minX) || !isFiniteNum(maxX)) {
+            return;
+        }
         
         const padding = 100;
         minX -= padding; maxX += padding;
         minY -= padding; maxY += padding;
         
-        const scaleX = 180 / (maxX - minX);
-        const scaleY = 120 / (maxY - minY);
+        const rangeX = maxX - minX;
+        const rangeY = maxY - minY;
+        
+        // Avoid division by zero
+        if (rangeX <= 0 || rangeY <= 0) {
+            return;
+        }
+        
+        const scaleX = 180 / rangeX;
+        const scaleY = 120 / rangeY;
         const scale = Math.min(scaleX, scaleY);
         
-        const offsetX = (180 - (maxX - minX) * scale) / 2;
-        const offsetY = (120 - (maxY - minY) * scale) / 2;
+        const offsetX = (180 - rangeX * scale) / 2;
+        const offsetY = (120 - rangeY * scale) / 2;
         
         // Draw nodes
         workloadNodes.forEach(n => {
+            if (!isFiniteNum(n.x) || !isFiniteNum(n.y)) return;
             const x = (n.x - minX) * scale + offsetX;
             const y = (n.y - minY) * scale + offsetY;
+            if (!isFiniteNum(x) || !isFiniteNum(y)) return;
             minimapCtx.beginPath();
             minimapCtx.arc(x, y, 3, 0, Math.PI * 2);
-            minimapCtx.fillStyle = colors[n.data.kind];
+            minimapCtx.fillStyle = colors[n.data.kind] || colors.Deployment;
             minimapCtx.fill();
         });
         
@@ -805,9 +936,11 @@
         const vw = (viewMaxWorld.x - viewMinWorld.x) * scale;
         const vh = (viewMaxWorld.y - viewMinWorld.y) * scale;
         
-        minimapCtx.strokeStyle = 'rgba(57, 186, 230, 0.6)';
-        minimapCtx.lineWidth = 1;
-        minimapCtx.strokeRect(vx, vy, vw, vh);
+        if (isFiniteNum(vx) && isFiniteNum(vy) && isFiniteNum(vw) && isFiniteNum(vh)) {
+            minimapCtx.strokeStyle = 'rgba(57, 186, 230, 0.6)';
+            minimapCtx.lineWidth = 1;
+            minimapCtx.strokeRect(vx, vy, vw, vh);
+        }
     }
     
     function findNodeAt(x, y) {
@@ -1049,7 +1182,34 @@
     // Initialize
     window.addEventListener('resize', resize);
     resize();
+    
+    // Center view on nodes after initial setup
+    setTimeout(() => {
+        if (workloadNodes.length > 0) {
+            // Find center of all nodes
+            let sumX = 0, sumY = 0, count = 0;
+            workloadNodes.forEach(n => {
+                if (isFiniteNum(n.x) && isFiniteNum(n.y)) {
+                    sumX += n.x;
+                    sumY += n.y;
+                    count++;
+                }
+            });
+            if (count > 0) {
+                const centerX = sumX / count;
+                const centerY = sumY / count;
+                panX = width / 2 - centerX * zoom;
+                panY = height / 2 - centerY * zoom;
+                console.log('dnmap: centered view on', centerX, centerY, '-> pan', panX, panY);
+            }
+        }
+    }, 100);
+    
     draw();
+    console.log('dnmap: initialization complete');
+    } catch (e) {
+        console.error('dnmap: ERROR:', e);
+    }
     </script>
 </body>
 </html>
