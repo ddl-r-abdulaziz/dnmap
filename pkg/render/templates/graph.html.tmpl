@@ -639,24 +639,7 @@
             }
             
             .warning-dialog-overlay.open .warning-filters {
-                background: #f5f5f5;
-                border-bottom: 1px solid #ddd;
-                print-color-adjust: exact;
-                -webkit-print-color-adjust: exact;
-            }
-            
-            .warning-dialog-overlay.open .warning-filter select {
-                border: 1px solid #999;
-                background: white;
-                color: #333;
-            }
-            
-            .warning-dialog-overlay.open .warning-filter label {
-                color: #666;
-            }
-            
-            .warning-dialog-overlay.open .warning-count {
-                color: #666;
+                display: none;
             }
             
             .warning-dialog-overlay.open .warning-table {
@@ -768,7 +751,6 @@
             <button class="btn" onclick="openWarningReport()">Warning Report</button>
             <button class="btn" onclick="resetView()">Reset View</button>
             <button class="btn" onclick="reLayout()">Re-Layout</button>
-            <button class="btn btn-primary" onclick="exportPNG()">Export PNG</button>
         </div>
     </header>
     
@@ -2059,12 +2041,6 @@
         centerView();
     }
     
-    function exportPNG() {
-        const link = document.createElement('a');
-        link.download = 'network-map.png';
-        link.href = canvas.toDataURL('image/png');
-        link.click();
-    }
     
     // Initialize
     window.addEventListener('resize', resize);
