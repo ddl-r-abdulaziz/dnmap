@@ -746,8 +746,8 @@
         
         <div class="controls">
             <button class="btn" onclick="clearSelection()">Clear Selection</button>
-            <button class="btn" id="hover-edges-btn" onclick="toggleHoverEdges()">Hover Edges: ON</button>
-            <button class="btn" id="warnings-btn" onclick="toggleWarnings()">Warnings: OFF</button>
+            <button class="btn" id="hover-edges-btn" onclick="toggleHoverEdges()">Hover Edges: OFF</button>
+            <button class="btn" id="warnings-btn" onclick="toggleWarnings()">Warnings: ON</button>
             <button class="btn" onclick="openWarningReport()">Warning Report</button>
             <button class="btn" onclick="resetView()">Reset View</button>
             <button class="btn" onclick="reLayout()">Re-Layout</button>
@@ -1047,8 +1047,8 @@
     let hoveredEdge = null;
     let searchTerm = '';
     let selectedNode = null; // Currently selected workload
-    let showEdgesOnHover = true; // Toggle for hover edge preview
-    let showWarnings = false; // Toggle for showing warning icons
+    let showEdgesOnHover = false; // Toggle for hover edge preview
+    let showWarnings = true; // Toggle for showing warning icons
     
     let frameCount = 0;
     function draw() {
