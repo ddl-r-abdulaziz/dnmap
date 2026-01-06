@@ -2,11 +2,13 @@
 package main
 
 import (
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/ddl-r-abdulaziz/dnmap/pkg/graph"
@@ -16,6 +18,12 @@ import (
 
 const (
 	defaultOutputFile = "network-map.html"
+)
+
+// Global state for the current graph (protected by mutex for concurrent access)
+var (
+	currentGraph *graph.NetworkGraph
+	graphMutex   sync.RWMutex
 )
 
 func main() {
@@ -103,6 +111,55 @@ func run(kubeconfig, outputFile, namespaces string, serve bool, port string, ref
 		w.Write([]byte("ok"))
 	})
 
+	// Warnings CSV endpoint
+	http.HandleFunc("/warnings.csv", func(w http.ResponseWriter, r *http.Request) {
+		graphMutex.RLock()
+		g := currentGraph
+		graphMutex.RUnlock()
+
+		if g == nil {
+			http.Error(w, "Graph not yet generated", http.StatusServiceUnavailable)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=warnings.csv")
+
+		csvWriter := csv.NewWriter(w)
+		defer csvWriter.Flush()
+
+		// Write header
+		csvWriter.Write([]string{"Workload", "Namespace", "Policy", "Warning Type", "Description"})
+
+		// Write data
+		for _, wd := range g.WarningDetails {
+			// Extract policy name without namespace prefix
+			policyName := wd.PolicyName
+			if idx := len(wd.Namespace) + 1; idx < len(policyName) {
+				policyName = policyName[idx:]
+			}
+
+			// Get warning description
+			var description string
+			switch wd.WarningType {
+			case graph.WarningNoPorts:
+				description = "Rule allows all ports (no port restriction)"
+			case graph.WarningNoSelector:
+				description = "Rule allows from all sources (no selector)"
+			default:
+				description = string(wd.WarningType)
+			}
+
+			csvWriter.Write([]string{
+				wd.WorkloadName,
+				wd.Namespace,
+				policyName,
+				string(wd.WarningType),
+				description,
+			})
+		}
+	})
+
 	fmt.Printf("Serving network map at http://0.0.0.0:%s/ (refresh every %v)\n", port, refreshInterval)
 	fmt.Printf("Serving from directory: %s\n", dir)
 	return http.ListenAndServe(":"+port, nil)
@@ -145,6 +202,11 @@ func generateMap(client *k8s.Client, nsList []string, outputFile string) error {
 	builder := graph.NewBuilder().WithNamespaceLabels(namespaceInfos)
 	networkGraph := builder.Build(workloads, policies)
 	fmt.Printf("Generated graph with %d nodes and %d edges\n", len(networkGraph.Nodes), len(networkGraph.Edges))
+
+	// Store the graph for CSV export
+	graphMutex.Lock()
+	currentGraph = networkGraph
+	graphMutex.Unlock()
 
 	// Render to HTML
 	renderer, err := render.NewHTMLRenderer()

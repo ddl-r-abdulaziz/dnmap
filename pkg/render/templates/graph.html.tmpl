@@ -466,6 +466,31 @@
             padding: 0;
         }
         
+        .warning-dialog-footer {
+            padding: 12px 16px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            display: flex;
+            justify-content: flex-end;
+        }
+        
+        .warning-csv-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--accent-cyan);
+            text-decoration: none;
+            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 4px;
+            transition: all 0.15s ease;
+        }
+        
+        .warning-csv-link:hover {
+            background: rgba(57, 186, 230, 0.1);
+            color: var(--accent-cyan);
+        }
+        
         .warning-table {
             width: 100%;
             border-collapse: collapse;
@@ -642,6 +667,10 @@
                 display: none;
             }
             
+            .warning-dialog-overlay.open .warning-dialog-footer {
+                display: none;
+            }
+            
             .warning-dialog-overlay.open .warning-table {
                 width: 100%;
             }
@@ -813,6 +842,16 @@
             </div>
             <div class="warning-dialog-content" id="warning-dialog-content">
                 <!-- Table will be populated by JavaScript -->
+            </div>
+            <div class="warning-dialog-footer">
+                <a href="warnings.csv" class="warning-csv-link" download>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Download as CSV
+                </a>
             </div>
         </div>
     </div>
