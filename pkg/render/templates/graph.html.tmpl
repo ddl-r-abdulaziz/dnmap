@@ -679,10 +679,24 @@
         const hoveredWorkload = (showEdgesOnHover && hoveredNode && hoveredNode.data.type === 'workload') ? hoveredNode : null;
         const hoveredPort = (showEdgesOnHover && hoveredNode && hoveredNode.data.type === 'port') ? hoveredNode : null;
         const nodesToShowEdges = [];
-        if (selectedNode) nodesToShowEdges.push({ node: selectedNode, transparent: false, filterPort: null });
-        if (hoveredWorkload && hoveredWorkload !== selectedNode) nodesToShowEdges.push({ node: hoveredWorkload, transparent: true, filterPort: null });
-        if (hoveredPort) {
-            // For hovered port, show only edges to/from this specific port
+        
+        // Handle selected node (workload or port)
+        if (selectedNode) {
+            if (selectedNode.data.type === 'workload') {
+                nodesToShowEdges.push({ node: selectedNode, transparent: false, filterPort: null });
+            } else if (selectedNode.data.type === 'port') {
+                const parentWorkload = nodes.get(selectedNode.data.parent);
+                if (parentWorkload) nodesToShowEdges.push({ node: parentWorkload, transparent: false, filterPort: selectedNode });
+            }
+        }
+        
+        // Handle hovered workload (if different from selected)
+        if (hoveredWorkload && hoveredWorkload !== selectedNode) {
+            nodesToShowEdges.push({ node: hoveredWorkload, transparent: true, filterPort: null });
+        }
+        
+        // Handle hovered port (if different from selected)
+        if (hoveredPort && hoveredPort !== selectedNode) {
             const parentWorkload = nodes.get(hoveredPort.data.parent);
             if (parentWorkload) nodesToShowEdges.push({ node: parentWorkload, transparent: true, filterPort: hoveredPort });
         }
@@ -863,6 +877,7 @@
             if (!isFiniteNum(screen.x) || !isFiniteNum(screen.y)) return;
             
             const isHovered = hoveredNode === node;
+            const isSelected = selectedNode === node;
             const hasService = node.data.serviceName && node.data.serviceName !== '';
             
             // Wider port if it has a service name
@@ -871,16 +886,25 @@
             const h = PORT_HEIGHT * zoom;
             const color = hasService ? '#82aaff' : colors.port; // Blue for service-backed ports
             
+            // Glow for selected
+            if (isSelected) {
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 15;
+            }
+            
             // Port body
             ctx.beginPath();
             roundRect(ctx, screen.x - w/2, screen.y - h/2, w, h, 3 * zoom);
             
-            ctx.fillStyle = isHovered ? color + '60' : color + '30';
+            ctx.fillStyle = (isSelected || isHovered) ? color + '60' : color + '30';
             ctx.fill();
             
-            ctx.strokeStyle = isHovered ? color : color + '80';
-            ctx.lineWidth = isHovered ? 2 : 1;
+            ctx.strokeStyle = (isSelected || isHovered) ? color : color + '80';
+            ctx.lineWidth = isSelected ? 3 : (isHovered ? 2 : 1);
             ctx.stroke();
+            
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
             
             // Port text: show service name if available, otherwise port number
             const fontSize = 9 * zoom;
@@ -1235,8 +1259,8 @@
         const clickDuration = Date.now() - mouseDownTime;
         const wasClick = clickDuration < 200; // Less than 200ms = click, not drag
         
-        if (wasClick && mouseDownNode && mouseDownNode.data.type === 'workload') {
-            // Toggle selection
+        if (wasClick && mouseDownNode) {
+            // Toggle selection for workloads or ports
             if (selectedNode === mouseDownNode) {
                 selectedNode = null; // Deselect
             } else {
@@ -1261,9 +1285,16 @@
     function updateSelectionInfo() {
         const infoEl = document.getElementById('selection-info');
         if (selectedNode) {
-            const outbound = edges.filter(e => e.sourceNode.data.id === selectedNode.data.id).length;
-            const inbound = edges.filter(e => e.targetNode.data.parent === selectedNode.data.id).length;
-            infoEl.textContent = selectedNode.data.label + ' (' + outbound + ' out, ' + inbound + ' in)';
+            if (selectedNode.data.type === 'workload') {
+                const outbound = edges.filter(e => e.sourceNode.data.id === selectedNode.data.id).length;
+                const inbound = edges.filter(e => e.targetNode.data.parent === selectedNode.data.id).length;
+                infoEl.textContent = selectedNode.data.label + ' (' + outbound + ' out, ' + inbound + ' in)';
+            } else if (selectedNode.data.type === 'port') {
+                const portId = selectedNode.data.id;
+                const inbound = edges.filter(e => e.targetNode.data.id === portId).length;
+                const label = selectedNode.data.serviceName || selectedNode.data.port;
+                infoEl.textContent = label + ' (' + inbound + ' inbound)';
+            }
             infoEl.style.display = 'block';
         } else {
             infoEl.style.display = 'none';
