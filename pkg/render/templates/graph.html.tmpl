@@ -442,7 +442,13 @@
         edgeHover: 'rgba(57, 186, 230, 0.8)',
     };
     
-    // Node physics
+    // Node dimensions
+    const WORKLOAD_WIDTH = 140;
+    const WORKLOAD_HEADER_HEIGHT = 36; // Space for label + namespace
+    const PORT_WIDTH = 32;
+    const PORT_HEIGHT = 18;
+    const PORT_GAP = 4; // Gap between ports
+    
     class GraphNode {
         constructor(data) {
             this.data = data;
@@ -450,9 +456,22 @@
             this.y = (Math.random() * 600 - 300) || 0;
             this.vx = 0;
             this.vy = 0;
-            this.radius = data.type === 'port' ? 8 : 24;
             this.fixed = false;
+            // Dimensions (height calculated later for workloads based on ports)
+            if (data.type === 'port') {
+                this.width = PORT_WIDTH;
+                this.height = PORT_HEIGHT;
+            } else {
+                this.width = WORKLOAD_WIDTH;
+                this.height = WORKLOAD_HEADER_HEIGHT + PORT_HEIGHT; // Minimum height, updated later
+            }
         }
+    }
+    
+    // Calculate workload height based on number of ports
+    function updateWorkloadHeight(workloadNode, portCount) {
+        const portsHeight = portCount * PORT_HEIGHT + (portCount - 1) * PORT_GAP;
+        workloadNode.height = WORKLOAD_HEADER_HEIGHT + Math.max(portsHeight, PORT_HEIGHT) + 8; // 8px padding bottom
     }
     
     // Helper to check if a number is finite
@@ -504,6 +523,12 @@
     
     // Grid layout function - groups by namespace, no overlaps
     function applyGridLayout() {
+        // First pass: update all workload heights based on port count
+        workloadNodes.forEach(node => {
+            const ports = getPortsForWorkload(node);
+            updateWorkloadHeight(node, ports.length || 1);
+        });
+        
         // Group workloads by namespace
         const byNamespace = {};
         workloadNodes.forEach(node => {
@@ -513,28 +538,36 @@
         });
         
         const namespaces = Object.keys(byNamespace).sort();
-        const nodeSpacing = 180; // Horizontal spacing between nodes
-        const rowSpacing = 200; // Vertical spacing between rows
-        const namespaceGap = 100; // Extra gap between namespaces
+        const nodeSpacing = WORKLOAD_WIDTH + 40; // Horizontal spacing
+        const namespaceGap = 80;
         const nodesPerRow = Math.ceil(Math.sqrt(workloadNodes.length / namespaces.length)) + 2;
         
         let currentY = 0;
         
         namespaces.forEach((ns, nsIdx) => {
             const nsNodes = byNamespace[ns];
-            const rows = Math.ceil(nsNodes.length / nodesPerRow);
             
-            nsNodes.forEach((node, idx) => {
-                const row = Math.floor(idx / nodesPerRow);
-                const col = idx % nodesPerRow;
+            // Organize into rows
+            const rows = [];
+            for (let i = 0; i < nsNodes.length; i += nodesPerRow) {
+                rows.push(nsNodes.slice(i, i + nodesPerRow));
+            }
+            
+            rows.forEach((rowNodes, rowIdx) => {
+                // Find max height in this row
+                const maxHeight = Math.max(...rowNodes.map(n => n.height));
                 
-                node.x = col * nodeSpacing;
-                node.y = currentY + row * rowSpacing;
-                node.vx = 0;
-                node.vy = 0;
+                rowNodes.forEach((node, col) => {
+                    node.x = col * nodeSpacing;
+                    node.y = currentY + maxHeight / 2; // Center vertically in row
+                    node.vx = 0;
+                    node.vy = 0;
+                });
+                
+                currentY += maxHeight + 40; // Move to next row
             });
             
-            currentY += rows * rowSpacing + namespaceGap;
+            currentY += namespaceGap;
         });
         
         // Update port positions
@@ -662,51 +695,67 @@
                 if (!isFiniteNum(source.x) || !isFiniteNum(source.y)) return;
                 if (!isFiniteNum(target.x) || !isFiniteNum(target.y)) return;
                 
-                const start = worldToScreen(source.x, source.y);
-                const end = worldToScreen(target.x, target.y);
+                // Calculate connection points:
+                // - Outbound: from source workload's top center
+                // - Inbound: to target port's right side
+                const isOutbound = source.data.id === activeWorkloadId;
+                
+                // Source point: top center of workload
+                const sourceHeight = source.height || WORKLOAD_HEADER_HEIGHT;
+                const sourceX = source.x;
+                const sourceY = source.y - sourceHeight / 2;
+                
+                // Target point: right side of port
+                const targetX = target.x + PORT_WIDTH / 2;
+                const targetY = target.y;
+                
+                const start = worldToScreen(sourceX, sourceY);
+                const end = worldToScreen(targetX, targetY);
                 
                 // Skip if screen coordinates are invalid
                 if (!isFiniteNum(start.x) || !isFiniteNum(start.y)) return;
                 if (!isFiniteNum(end.x) || !isFiniteNum(end.y)) return;
                 
-                // Color based on direction: outbound (from active) vs inbound (to active)
-                const isOutbound = source.data.id === activeWorkloadId;
                 const isHovered = hoveredEdge === edge;
                 const baseOpacity = transparent ? 0.3 : 0.6;
                 const opacity = isHovered ? 1 : baseOpacity;
                 const color = isOutbound ? 'rgba(127, 217, 98, ' : 'rgba(255, 143, 64, '; // green outbound, orange inbound
                 
-                // Draw curved line
+                // Draw curved line with vertical start
                 ctx.beginPath();
-                const midX = (start.x + end.x) / 2;
-                const midY = (start.y + end.y) / 2;
                 const dx = end.x - start.x;
                 const dy = end.y - start.y;
-                const len = Math.sqrt(dx * dx + dy * dy) || 1;
-                const offset = len * 0.15;
-                const ctrlX = midX - dy / len * offset;
-                const ctrlY = midY + dx / len * offset;
                 
-                // Skip if control point is invalid
-                if (!isFiniteNum(ctrlX) || !isFiniteNum(ctrlY)) return;
+                // Control points for a nice curve
+                // Start going up from source, then curve to target
+                const ctrl1X = start.x;
+                const ctrl1Y = start.y - Math.abs(dy) * 0.3;
+                const ctrl2X = end.x + Math.abs(dx) * 0.3;
+                const ctrl2Y = end.y;
+                
+                if (!isFiniteNum(ctrl1X) || !isFiniteNum(ctrl1Y) || !isFiniteNum(ctrl2X) || !isFiniteNum(ctrl2Y)) return;
                 
                 ctx.moveTo(start.x, start.y);
-                ctx.quadraticCurveTo(ctrlX, ctrlY, end.x, end.y);
+                ctx.bezierCurveTo(ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, end.x, end.y);
                 ctx.strokeStyle = isHovered ? color + '1)' : color + opacity + ')';
                 ctx.lineWidth = isHovered ? 3 : (transparent ? 1.5 : 2);
                 ctx.stroke();
             });
         });
         
-        // Draw port-to-parent connections
+        // Draw port-to-parent connections (workload right edge to port left edge)
         portNodes.forEach(portNode => {
             const parent = nodes.get(portNode.data.parent);
             if (!parent) return;
             if (!isFiniteNum(parent.x) || !isFiniteNum(parent.y)) return;
             if (!isFiniteNum(portNode.x) || !isFiniteNum(portNode.y)) return;
             
-            const pScreen = worldToScreen(parent.x, parent.y);
-            const portScreen = worldToScreen(portNode.x, portNode.y);
+            // Connect workload's right edge to port's left edge
+            const parentRightX = parent.x + WORKLOAD_WIDTH / 2;
+            const portLeftX = portNode.x - PORT_WIDTH / 2;
+            
+            const pScreen = worldToScreen(parentRightX, portNode.y);
+            const portScreen = worldToScreen(portLeftX, portNode.y);
             
             if (!isFiniteNum(pScreen.x) || !isFiniteNum(pScreen.y)) return;
             if (!isFiniteNum(portScreen.x) || !isFiniteNum(portScreen.y)) return;
@@ -714,63 +763,40 @@
             ctx.beginPath();
             ctx.moveTo(pScreen.x, pScreen.y);
             ctx.lineTo(portScreen.x, portScreen.y);
-            ctx.strokeStyle = 'rgba(57, 186, 230, 0.2)';
+            ctx.strokeStyle = 'rgba(57, 186, 230, 0.3)';
             ctx.lineWidth = 1;
             ctx.stroke();
         });
         
-        // Draw nodes
-        const allNodes = [...workloadNodes, ...portNodes];
-        allNodes.forEach(node => {
-            // Skip nodes with invalid positions
-            if (!isFiniteNum(node.x) || !isFiniteNum(node.y)) {
-                return;
-            }
+        // Draw workload nodes (rectangles with dynamic height)
+        workloadNodes.forEach(node => {
+            if (!isFiniteNum(node.x) || !isFiniteNum(node.y)) return;
             
             const screen = worldToScreen(node.x, node.y);
-            
-            // Skip if screen coordinates are not finite
-            if (!isFiniteNum(screen.x) || !isFiniteNum(screen.y)) {
-                return;
-            }
+            if (!isFiniteNum(screen.x) || !isFiniteNum(screen.y)) return;
             
             const isHovered = hoveredNode === node;
             const isSearchMatch = searchTerm && node.data.label && node.data.label.toLowerCase().includes(searchTerm.toLowerCase());
-            const isWorkload = node.data.type === 'workload';
             const isSelected = selectedNode === node;
             
-            const radius = (node.radius || 8) * (zoom || 1);
-            
-            // Skip if radius is invalid
-            if (!isFiniteNum(radius) || radius <= 0) {
-                return;
-            }
-            
-            const color = isWorkload ? (colors[node.data.kind] || colors.Deployment) : colors.port;
+            const w = WORKLOAD_WIDTH * zoom;
+            const h = node.height * zoom; // Dynamic height based on ports
+            const headerH = WORKLOAD_HEADER_HEIGHT * zoom;
+            const color = colors[node.data.kind] || colors.Deployment;
             
             // Glow effect for selected, hovered, or search match
             if (isSelected || isHovered || isSearchMatch) {
-                const gradient = ctx.createRadialGradient(screen.x, screen.y, 0, screen.x, screen.y, radius * 2);
-                gradient.addColorStop(0, color + '40');
-                gradient.addColorStop(1, 'transparent');
-                ctx.beginPath();
-                ctx.arc(screen.x, screen.y, radius * 2, 0, Math.PI * 2);
-                ctx.fillStyle = gradient;
-                ctx.fill();
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 20;
             }
             
-            // Node body
+            // Workload body
             ctx.beginPath();
-            if (isWorkload) {
-                // Rounded rectangle for workloads
-                roundRect(ctx, screen.x - radius, screen.y - radius, radius * 2, radius * 2, 8 * zoom);
-            } else {
-                ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
-            }
+            roundRect(ctx, screen.x - w/2, screen.y - h/2, w, h, 6 * zoom);
             
-            const fillGradient = ctx.createLinearGradient(screen.x - radius, screen.y - radius, screen.x + radius, screen.y + radius);
-            fillGradient.addColorStop(0, color + '40');
-            fillGradient.addColorStop(1, color + '20');
+            const fillGradient = ctx.createLinearGradient(screen.x - w/2, screen.y - h/2, screen.x + w/2, screen.y + h/2);
+            fillGradient.addColorStop(0, color + '20');
+            fillGradient.addColorStop(1, color + '08');
             ctx.fillStyle = fillGradient;
             ctx.fill();
             
@@ -778,32 +804,78 @@
             ctx.lineWidth = isSelected ? 3 : (isHovered ? 2 : 1);
             ctx.stroke();
             
-            // Label
-            if (isWorkload || isHovered) {
-                ctx.font = (isWorkload ? '600 ' : '400 ') + Math.max(10, 12 * zoom) + 'px Outfit';
+            // Header separator line
+            ctx.beginPath();
+            ctx.moveTo(screen.x - w/2, screen.y - h/2 + headerH);
+            ctx.lineTo(screen.x + w/2, screen.y - h/2 + headerH);
+            ctx.strokeStyle = color + '40';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            
+            // Label at top center (in header area)
+            const fontSize = 11 * zoom;
+            if (fontSize >= 6) { // Only show if readable
+                ctx.font = '600 ' + fontSize + 'px Outfit';
                 ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
+                ctx.textBaseline = 'top';
                 
                 const label = node.data.label || '';
-                const maxLen = 12;
-                const displayLabel = label.length > maxLen ? label.slice(0, maxLen) + '…' : label;
-                
-                if (isWorkload) {
-                    ctx.fillStyle = '#0a0e14';
-                    ctx.fillText(displayLabel, screen.x, screen.y);
-                    ctx.fillStyle = color;
-                    ctx.fillText(displayLabel, screen.x - 0.5, screen.y - 0.5);
-                } else {
-                    ctx.fillStyle = color;
-                    ctx.fillText(node.data.port || '', screen.x, screen.y);
+                // Truncate to fit width
+                const maxWidth = w - 10 * zoom;
+                let displayLabel = label;
+                while (ctx.measureText(displayLabel).width > maxWidth && displayLabel.length > 3) {
+                    displayLabel = displayLabel.slice(0, -2) + '…';
                 }
+                
+                ctx.fillStyle = color;
+                ctx.fillText(displayLabel, screen.x, screen.y - h/2 + 5 * zoom);
             }
             
-            // Namespace badge for workloads
-            if (isWorkload && zoom > 0.6) {
-                ctx.font = '500 ' + Math.max(8, 9 * zoom) + 'px JetBrains Mono';
-                ctx.fillStyle = 'rgba(98, 106, 115, 0.8)';
-                ctx.fillText(node.data.namespace || '', screen.x, screen.y + radius + 12 * zoom);
+            // Namespace badge below label
+            const nsFontSize = 9 * zoom;
+            if (nsFontSize >= 5) {
+                ctx.font = '400 ' + nsFontSize + 'px JetBrains Mono';
+                ctx.fillStyle = 'rgba(98, 106, 115, 0.9)';
+                ctx.textBaseline = 'top';
+                ctx.fillText(node.data.namespace || '', screen.x, screen.y - h/2 + 5 * zoom + fontSize + 2 * zoom);
+            }
+        });
+        
+        // Draw port nodes (small rectangles on right side of workloads)
+        portNodes.forEach(node => {
+            if (!isFiniteNum(node.x) || !isFiniteNum(node.y)) return;
+            
+            const screen = worldToScreen(node.x, node.y);
+            if (!isFiniteNum(screen.x) || !isFiniteNum(screen.y)) return;
+            
+            const isHovered = hoveredNode === node;
+            
+            const w = PORT_WIDTH * zoom;
+            const h = PORT_HEIGHT * zoom;
+            const color = colors.port;
+            
+            // Port body
+            ctx.beginPath();
+            roundRect(ctx, screen.x - w/2, screen.y - h/2, w, h, 3 * zoom);
+            
+            ctx.fillStyle = isHovered ? color + '60' : color + '30';
+            ctx.fill();
+            
+            ctx.strokeStyle = isHovered ? color : color + '80';
+            ctx.lineWidth = isHovered ? 2 : 1;
+            ctx.stroke();
+            
+            // Port number inside
+            const fontSize = 9 * zoom;
+            if (fontSize >= 5) { // Only show if readable
+                ctx.font = '500 ' + fontSize + 'px JetBrains Mono';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = color;
+                ctx.fillText(node.data.port || '', screen.x, screen.y);
             }
         });
         
@@ -872,16 +944,14 @@
         const offsetX = (180 - rangeX * scale) / 2;
         const offsetY = (120 - rangeY * scale) / 2;
         
-        // Draw nodes
+        // Draw nodes as small rectangles
         workloadNodes.forEach(n => {
             if (!isFiniteNum(n.x) || !isFiniteNum(n.y)) return;
             const x = (n.x - minX) * scale + offsetX;
             const y = (n.y - minY) * scale + offsetY;
             if (!isFiniteNum(x) || !isFiniteNum(y)) return;
-            minimapCtx.beginPath();
-            minimapCtx.arc(x, y, 3, 0, Math.PI * 2);
             minimapCtx.fillStyle = colors[n.data.kind] || colors.Deployment;
-            minimapCtx.fill();
+            minimapCtx.fillRect(x - 3, y - 2, 6, 4);
         });
         
         // Draw viewport rectangle
@@ -902,16 +972,25 @@
     
     function findNodeAt(x, y) {
         const world = screenToWorld(x, y);
-        const allNodes = [...portNodes, ...workloadNodes]; // Check ports first
         
-        for (const node of allNodes) {
-            const dx = world.x - node.x;
-            const dy = world.y - node.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < node.radius + 5) {
+        // Check ports first (they're on top)
+        for (const node of portNodes) {
+            const hw = PORT_WIDTH / 2 + 5;
+            const hh = PORT_HEIGHT / 2 + 5;
+            if (Math.abs(world.x - node.x) < hw && Math.abs(world.y - node.y) < hh) {
                 return node;
             }
         }
+        
+        // Check workloads (with dynamic height)
+        for (const node of workloadNodes) {
+            const hw = WORKLOAD_WIDTH / 2 + 5;
+            const hh = (node.height || WORKLOAD_HEADER_HEIGHT) / 2 + 5;
+            if (Math.abs(world.x - node.x) < hw && Math.abs(world.y - node.y) < hh) {
+                return node;
+            }
+        }
+        
         return null;
     }
     
@@ -1028,17 +1107,21 @@
         return portNodes.filter(p => p.data.parent === workloadNode.data.id);
     }
     
-    // Update port positions relative to their parent workload
+    // Update port positions relative to their parent workload (inside, below header, right-aligned)
     function updatePortPositions(workloadNode) {
         const ports = getPortsForWorkload(workloadNode);
+        const portCount = ports.length || 1;
+        
+        // Update workload height based on port count
+        updateWorkloadHeight(workloadNode, portCount);
+        
+        // Position ports inside workload, below header, on the right side
+        const startY = workloadNode.y - workloadNode.height / 2 + WORKLOAD_HEADER_HEIGHT + PORT_HEIGHT / 2;
+        
         ports.forEach((portNode, idx) => {
-            const total = ports.length;
-            const startAngle = -Math.PI / 2;
-            const spread = Math.PI * 2 / Math.max(total, 1);
-            const angle = startAngle + idx * spread;
-            const dist = 40;
-            portNode.x = workloadNode.x + Math.cos(angle) * dist;
-            portNode.y = workloadNode.y + Math.sin(angle) * dist;
+            // Right-aligned inside the workload, overlapping the right edge
+            portNode.x = workloadNode.x + WORKLOAD_WIDTH / 2 - PORT_WIDTH / 2 + 4;
+            portNode.y = startY + idx * (PORT_HEIGHT + PORT_GAP);
         });
     }
     
