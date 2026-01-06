@@ -361,7 +361,7 @@
         <div class="controls">
             <button class="btn" onclick="clearSelection()">Clear Selection</button>
             <button class="btn" onclick="resetView()">Reset View</button>
-            <button class="btn" id="physics-btn" onclick="togglePhysics()">Physics: ON</button>
+            <button class="btn" onclick="reLayout()">Re-Layout</button>
             <button class="btn btn-primary" onclick="exportPNG()">Export PNG</button>
         </div>
     </header>
@@ -430,7 +430,6 @@
     let dragNode = null;
     let dragOffsetX = 0, dragOffsetY = 0;
     let lastMouseX = 0, lastMouseY = 0;
-    let physicsEnabled = true;
     
     // Colors
     const colors = {
@@ -502,9 +501,52 @@
     
     // Debug logging
     console.log('dnmap: loaded', workloadNodes.length, 'workloads,', portNodes.length, 'ports,', edges.length, 'edges');
-    if (workloadNodes.length > 0) {
-        console.log('dnmap: first workload position:', workloadNodes[0].x, workloadNodes[0].y);
+    
+    // Grid layout function - groups by namespace, no overlaps
+    function applyGridLayout() {
+        // Group workloads by namespace
+        const byNamespace = {};
+        workloadNodes.forEach(node => {
+            const ns = node.data.namespace || 'default';
+            if (!byNamespace[ns]) byNamespace[ns] = [];
+            byNamespace[ns].push(node);
+        });
+        
+        const namespaces = Object.keys(byNamespace).sort();
+        const nodeSpacing = 180; // Horizontal spacing between nodes
+        const rowSpacing = 200; // Vertical spacing between rows
+        const namespaceGap = 100; // Extra gap between namespaces
+        const nodesPerRow = Math.ceil(Math.sqrt(workloadNodes.length / namespaces.length)) + 2;
+        
+        let currentY = 0;
+        
+        namespaces.forEach((ns, nsIdx) => {
+            const nsNodes = byNamespace[ns];
+            const rows = Math.ceil(nsNodes.length / nodesPerRow);
+            
+            nsNodes.forEach((node, idx) => {
+                const row = Math.floor(idx / nodesPerRow);
+                const col = idx % nodesPerRow;
+                
+                node.x = col * nodeSpacing;
+                node.y = currentY + row * rowSpacing;
+                node.vx = 0;
+                node.vy = 0;
+            });
+            
+            currentY += rows * rowSpacing + namespaceGap;
+        });
+        
+        // Update port positions
+        workloadNodes.forEach(node => {
+            updatePortPositions(node);
+        });
+        
+        console.log('dnmap: applied grid layout for', namespaces.length, 'namespaces');
     }
+    
+    // Apply initial layout
+    applyGridLayout();
     
     function resize() {
         const rect = canvas.parentElement.getBoundingClientRect();
@@ -554,118 +596,6 @@
         };
     }
     
-    function applyPhysics() {
-        if (!physicsEnabled) return;
-        
-        const damping = 0.85;
-        const repulsion = 8000;
-        const attraction = 0.002;
-        const centerForce = 0.0002;
-        const maxVelocity = 30;
-        const minDist = 80; // Minimum distance between workload centers
-        const idealDist = 150; // Ideal distance between workloads
-        
-        // Repulsion between workload nodes
-        for (let i = 0; i < workloadNodes.length; i++) {
-            for (let j = i + 1; j < workloadNodes.length; j++) {
-                const a = workloadNodes[i];
-                const b = workloadNodes[j];
-                
-                let dx = b.x - a.x;
-                let dy = b.y - a.y;
-                let dist = Math.sqrt(dx * dx + dy * dy);
-                
-                // If nodes are overlapping or too close, apply strong separation
-                if (dist < idealDist) {
-                    // Stronger force when closer
-                    const overlap = idealDist - dist;
-                    let separationForce = overlap * 0.5;
-                    
-                    // Handle near-zero distance
-                    if (dist < 1) {
-                        dx = (Math.random() - 0.5) * 2;
-                        dy = (Math.random() - 0.5) * 2;
-                        dist = 1;
-                        separationForce = 20;
-                    }
-                    
-                    const fx = (dx / dist) * separationForce;
-                    const fy = (dy / dist) * separationForce;
-                    
-                    if (!a.fixed) { a.vx -= fx; a.vy -= fy; }
-                    if (!b.fixed) { b.vx += fx; b.vy += fy; }
-                } else {
-                    // Normal repulsion at distance
-                    let force = repulsion / (dist * dist);
-                    force = Math.min(force, 5);
-                    
-                    const fx = (dx / dist) * force;
-                    const fy = (dy / dist) * force;
-                    
-                    if (!a.fixed) { a.vx -= fx; a.vy -= fy; }
-                    if (!b.fixed) { b.vx += fx; b.vy += fy; }
-                }
-            }
-        }
-        
-        // Edge attraction
-        edges.forEach(edge => {
-            const source = edge.sourceNode;
-            const target = edge.targetNode;
-            const parent = nodes.get(target.data.parent);
-            
-            if (source && parent) {
-                let dx = parent.x - source.x;
-                let dy = parent.y - source.y;
-                let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                let force = Math.min(dist * attraction, 5); // Clamp attraction force
-                
-                if (!source.fixed) { source.vx += (dx / dist) * force; source.vy += (dy / dist) * force; }
-                if (!parent.fixed) { parent.vx -= (dx / dist) * force; parent.vy -= (dy / dist) * force; }
-            }
-        });
-        
-        // Center force
-        workloadNodes.forEach(node => {
-            if (!node.fixed) {
-                node.vx -= node.x * centerForce;
-                node.vy -= node.y * centerForce;
-            }
-        });
-        
-        // Apply velocity with clamping
-        workloadNodes.forEach(node => {
-            if (!node.fixed) {
-                node.vx *= damping;
-                node.vy *= damping;
-                
-                // Clamp velocity to prevent explosion
-                node.vx = Math.max(-maxVelocity, Math.min(maxVelocity, node.vx));
-                node.vy = Math.max(-maxVelocity, Math.min(maxVelocity, node.vy));
-                
-                // Only update position if velocity is finite
-                if (isFiniteNum(node.vx) && isFiniteNum(node.vy)) {
-                    node.x += node.vx;
-                    node.y += node.vy;
-                } else {
-                    // Reset velocity if it became invalid
-                    node.vx = 0;
-                    node.vy = 0;
-                }
-                
-                // Clamp position to prevent nodes from going too far
-                node.x = Math.max(-5000, Math.min(5000, node.x));
-                node.y = Math.max(-5000, Math.min(5000, node.y));
-            }
-        });
-        
-        // Port nodes follow parents
-        workloadNodes.forEach(workloadNode => {
-            if (isFiniteNum(workloadNode.x) && isFiniteNum(workloadNode.y)) {
-                updatePortPositions(workloadNode);
-            }
-        });
-    }
     
     let hoveredNode = null;
     let hoveredEdge = null;
@@ -1249,14 +1179,12 @@
     }
     
     function resetView() {
-        panX = width / 2;
-        panY = height / 2;
-        zoom = 1;
+        centerView();
     }
     
-    function togglePhysics() {
-        physicsEnabled = !physicsEnabled;
-        document.getElementById('physics-btn').textContent = 'Physics: ' + (physicsEnabled ? 'ON' : 'OFF');
+    function reLayout() {
+        applyGridLayout();
+        centerView();
     }
     
     function exportPNG() {
@@ -1266,34 +1194,43 @@
         link.click();
     }
     
-    // Physics loop
-    setInterval(applyPhysics, 16);
-    
     // Initialize
     window.addEventListener('resize', resize);
     resize();
     
-    // Center view on nodes after initial setup
-    setTimeout(() => {
+    // Function to center view on nodes
+    function centerView() {
         if (workloadNodes.length > 0) {
-            // Find center of all nodes
-            let sumX = 0, sumY = 0, count = 0;
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
             workloadNodes.forEach(n => {
                 if (isFiniteNum(n.x) && isFiniteNum(n.y)) {
-                    sumX += n.x;
-                    sumY += n.y;
-                    count++;
+                    minX = Math.min(minX, n.x);
+                    maxX = Math.max(maxX, n.x);
+                    minY = Math.min(minY, n.y);
+                    maxY = Math.max(maxY, n.y);
                 }
             });
-            if (count > 0) {
-                const centerX = sumX / count;
-                const centerY = sumY / count;
+            if (isFiniteNum(minX) && isFiniteNum(maxX)) {
+                const centerX = (minX + maxX) / 2;
+                const centerY = (minY + maxY) / 2;
+                
+                // Adjust zoom to fit all nodes
+                const graphWidth = maxX - minX + 200;
+                const graphHeight = maxY - minY + 200;
+                const zoomX = width / graphWidth;
+                const zoomY = height / graphHeight;
+                zoom = Math.min(zoomX, zoomY, 1); // Don't zoom in more than 1x
+                zoom = Math.max(zoom, 0.1); // Don't zoom out too much
+                
                 panX = width / 2 - centerX * zoom;
                 panY = height / 2 - centerY * zoom;
-                console.log('dnmap: centered view on', centerX, centerY, '-> pan', panX, panY);
+                console.log('dnmap: centered view, zoom:', zoom.toFixed(2));
             }
         }
-    }, 100);
+    }
+    
+    // Center view after initial setup
+    setTimeout(centerView, 100);
     
     draw();
     console.log('dnmap: initialization complete');
