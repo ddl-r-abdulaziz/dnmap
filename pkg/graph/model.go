@@ -28,13 +28,14 @@ type Node struct {
 
 // Edge represents a connection between nodes in the network graph.
 type Edge struct {
-	ID       string            `json:"id"`
-	Source   string            `json:"source"` // Source node ID
-	Target   string            `json:"target"` // Target node ID (port node)
-	Label    string            `json:"label"`
-	Rule     string            `json:"rule"` // The network policy rule that allows this connection
-	Policy   string            `json:"policy"` // Name of the network policy
-	Metadata map[string]string `json:"metadata,omitempty"`
+	ID         string            `json:"id"`
+	Source     string            `json:"source"` // Source node ID
+	Target     string            `json:"target"` // Target node ID (port node)
+	Label      string            `json:"label"`
+	Rule       string            `json:"rule"` // The network policy rule that allows this connection
+	Policy     string            `json:"policy"` // Name of the network policy
+	PolicyYAML string            `json:"policyYaml,omitempty"` // Full policy YAML
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 // NetworkGraph represents the complete network graph.

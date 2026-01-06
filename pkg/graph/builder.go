@@ -7,6 +7,7 @@ import (
 	"github.com/ddl-r-abdulaziz/dnmap/pkg/k8s"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 )
 
 // Builder constructs network graphs from Kubernetes resources.
@@ -109,6 +110,14 @@ func (b *Builder) processK8sNetworkPolicy(policy *networkingv1.NetworkPolicy, wo
 					continue
 				}
 
+				// Generate policy YAML once per policy (elide managedFields)
+				policyYAML := ""
+				policyCopy := policy.DeepCopy()
+				policyCopy.ManagedFields = nil
+				if yamlBytes, err := yaml.Marshal(policyCopy); err == nil {
+					policyYAML = string(yamlBytes)
+				}
+
 				for _, port := range allowedPorts {
 					protocol := string(port.Protocol)
 					if protocol == "" {
@@ -117,12 +126,13 @@ func (b *Builder) processK8sNetworkPolicy(policy *networkingv1.NetworkPolicy, wo
 					portID := PortID(targetWID, port.ContainerPort, protocol)
 
 					edge := Edge{
-						ID:     fmt.Sprintf("edge-%d", *edgeID),
-						Source: sourceWID,
-						Target: portID,
-						Label:  fmt.Sprintf("%s:%d", protocol, port.ContainerPort),
-						Rule:   b.formatK8sRule(ingressRule, ruleIdx),
-						Policy: policy.Namespace + "/" + policy.Name,
+						ID:         fmt.Sprintf("edge-%d", *edgeID),
+						Source:     sourceWID,
+						Target:     portID,
+						Label:      fmt.Sprintf("%s:%d", protocol, port.ContainerPort),
+						Rule:       b.formatK8sRule(ingressRule, ruleIdx),
+						Policy:     policy.Namespace + "/" + policy.Name,
+						PolicyYAML: policyYAML,
 						Metadata: map[string]string{
 							"policyType": "NetworkPolicy",
 							"ruleType":   "ingress",
@@ -179,6 +189,14 @@ func (b *Builder) processIstioAuthPolicy(policy *k8s.IstioAuthorizationPolicy, w
 				}
 			}
 
+			// Generate policy YAML once per policy (elide managedFields)
+			policyYAML := ""
+			policyCopy := policy.DeepCopy()
+			policyCopy.ManagedFields = nil
+			if yamlBytes, err := yaml.Marshal(policyCopy); err == nil {
+				policyYAML = string(yamlBytes)
+			}
+
 			// Create edges from each source to each allowed port
 			for _, sourceW := range sourceWorkloads {
 				sourceWID := WorkloadID(sourceW.Namespace, sourceW.Name)
@@ -193,16 +211,17 @@ func (b *Builder) processIstioAuthPolicy(policy *k8s.IstioAuthorizationPolicy, w
 					portID := PortID(targetWID, int32(port), protocol)
 
 					edge := Edge{
-						ID:     fmt.Sprintf("edge-%d", *edgeID),
-						Source: sourceWID,
-						Target: portID,
-						Label:  fmt.Sprintf("%s:%d", protocol, port),
-						Rule:   b.formatIstioRule(rule, ruleIdx),
-						Policy: policy.Namespace + "/" + policy.Name,
-					Metadata: map[string]string{
-						"policyType": "AuthorizationPolicy",
-						"action":     policy.Spec.GetAction().String(),
-					},
+						ID:         fmt.Sprintf("edge-%d", *edgeID),
+						Source:     sourceWID,
+						Target:     portID,
+						Label:      fmt.Sprintf("%s:%d", protocol, port),
+						Rule:       b.formatIstioRule(rule, ruleIdx),
+						Policy:     policy.Namespace + "/" + policy.Name,
+						PolicyYAML: policyYAML,
+						Metadata: map[string]string{
+							"policyType": "AuthorizationPolicy",
+							"action":     policy.Spec.GetAction().String(),
+						},
 					}
 					edges = append(edges, edge)
 					*edgeID++

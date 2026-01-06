@@ -322,6 +322,81 @@
             font-size: 13px;
             color: var(--accent-cyan);
         }
+        
+        .policy-panel {
+            position: fixed;
+            top: 60px;
+            right: -400px;
+            width: 400px;
+            height: calc(100vh - 60px);
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            transition: right 0.3s ease;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .policy-panel.open {
+            right: 0;
+        }
+        
+        .policy-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-primary);
+        }
+        
+        .policy-panel-title {
+            font-weight: 600;
+            color: var(--accent-cyan);
+            font-size: 14px;
+        }
+        
+        .policy-panel-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+        
+        .policy-panel-close:hover {
+            color: var(--text-primary);
+        }
+        
+        .policy-panel-content {
+            flex: 1;
+            overflow: auto;
+            padding: 16px;
+        }
+        
+        .policy-yaml {
+            margin: 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .policy-yaml .key {
+            color: var(--accent-cyan);
+        }
+        
+        .policy-yaml .string {
+            color: var(--accent-green);
+        }
+        
+        .policy-yaml .number {
+            color: var(--accent-purple);
+        }
     </style>
 </head>
 <body>
@@ -404,6 +479,16 @@
     
     <div class="minimap">
         <canvas id="minimap-canvas"></canvas>
+    </div>
+    
+    <div class="policy-panel" id="policy-panel">
+        <div class="policy-panel-header">
+            <span class="policy-panel-title" id="policy-panel-title">Policy</span>
+            <button class="policy-panel-close" onclick="closePolicyPanel()">×</button>
+        </div>
+        <div class="policy-panel-content">
+            <pre class="policy-yaml" id="policy-yaml"></pre>
+        </div>
     </div>
     
     <script>
@@ -1292,8 +1377,15 @@
             // Toggle selection for workloads or ports
             if (selectedNode === mouseDownNode) {
                 selectedNode = null; // Deselect
+                closePolicyPanel();
             } else {
                 selectedNode = mouseDownNode; // Select
+                // Open policy panel if a port/service is selected
+                if (mouseDownNode.data.type === 'port') {
+                    openPolicyPanel(mouseDownNode);
+                } else {
+                    closePolicyPanel();
+                }
             }
             updateSelectionInfo();
         } else if (wasClick && !mouseDownNode) {
@@ -1363,6 +1455,56 @@
     function clearSelection() {
         selectedNode = null;
         updateSelectionInfo();
+        closePolicyPanel();
+    }
+    
+    function openPolicyPanel(portNode) {
+        const panel = document.getElementById('policy-panel');
+        const title = document.getElementById('policy-panel-title');
+        const yamlEl = document.getElementById('policy-yaml');
+        
+        // Find edges that target this port
+        const portId = portNode.data.id;
+        const relatedEdges = edges.filter(e => e.targetNode.data.id === portId);
+        
+        if (relatedEdges.length === 0) {
+            title.textContent = 'No policies found';
+            yamlEl.textContent = 'No network policies target this port.';
+        } else {
+            // Collect unique policies
+            const policies = new Map();
+            relatedEdges.forEach(e => {
+                if (e.policyYaml && !policies.has(e.policy)) {
+                    policies.set(e.policy, e.policyYaml);
+                }
+            });
+            
+            const portLabel = portNode.data.serviceName || portNode.data.port;
+            title.textContent = portLabel + ' - ' + policies.size + ' ' + (policies.size === 1 ? 'policy' : 'policies');
+            
+            // Render YAML with syntax highlighting
+            let content = '';
+            policies.forEach((yaml, name) => {
+                content += '# ' + name + '\n---\n' + yaml + '\n\n';
+            });
+            yamlEl.innerHTML = highlightYaml(content);
+        }
+        
+        panel.classList.add('open');
+    }
+    
+    function closePolicyPanel() {
+        document.getElementById('policy-panel').classList.remove('open');
+    }
+    
+    function highlightYaml(yaml) {
+        return yaml
+            .replace(/^(\s*)([a-zA-Z_][a-zA-Z0-9_-]*):/gm, '$1<span class="key">$2</span>:')
+            .replace(/: "([^"]*)"/g, ': "<span class="string">$1</span>"')
+            .replace(/: '([^']*)'/g, ': \'<span class="string">$1</span>\'')
+            .replace(/: (\d+)$/gm, ': <span class="number">$1</span>')
+            .replace(/^(#.*)$/gm, '<span style="color: #626a73;">$1</span>')
+            .replace(/^(---)$/gm, '<span style="color: #626a73;">$1</span>');
     }
     
     function toggleHoverEdges() {
