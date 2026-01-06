@@ -677,11 +677,17 @@
         
         // Draw edges for selected node and/or hovered node (if enabled)
         const hoveredWorkload = (showEdgesOnHover && hoveredNode && hoveredNode.data.type === 'workload') ? hoveredNode : null;
+        const hoveredPort = (showEdgesOnHover && hoveredNode && hoveredNode.data.type === 'port') ? hoveredNode : null;
         const nodesToShowEdges = [];
-        if (selectedNode) nodesToShowEdges.push({ node: selectedNode, transparent: false });
-        if (hoveredWorkload && hoveredWorkload !== selectedNode) nodesToShowEdges.push({ node: hoveredWorkload, transparent: true });
+        if (selectedNode) nodesToShowEdges.push({ node: selectedNode, transparent: false, filterPort: null });
+        if (hoveredWorkload && hoveredWorkload !== selectedNode) nodesToShowEdges.push({ node: hoveredWorkload, transparent: true, filterPort: null });
+        if (hoveredPort) {
+            // For hovered port, show only edges to/from this specific port
+            const parentWorkload = nodes.get(hoveredPort.data.parent);
+            if (parentWorkload) nodesToShowEdges.push({ node: parentWorkload, transparent: true, filterPort: hoveredPort });
+        }
         
-        nodesToShowEdges.forEach(({ node: activeNode, transparent }) => {
+        nodesToShowEdges.forEach(({ node: activeNode, transparent, filterPort }) => {
             const activeWorkloadId = activeNode.data.id;
             
             edges.forEach(edge => {
@@ -692,6 +698,12 @@
                 const targetParentId = target.data.parent;
                 const isConnected = (source.data.id === activeWorkloadId) || (targetParentId === activeWorkloadId);
                 if (!isConnected) return;
+                
+                // If filtering by specific port, only show edges to/from that port
+                if (filterPort) {
+                    const isPortMatch = (target.data.id === filterPort.data.id) || (source.data.id === filterPort.data.id);
+                    if (!isPortMatch) return;
+                }
                 
                 // Skip if source or target nodes are invalid
                 if (!source || !target) return;
