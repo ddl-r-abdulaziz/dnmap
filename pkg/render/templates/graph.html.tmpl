@@ -809,19 +809,31 @@
                 if (!isFiniteNum(source.x) || !isFiniteNum(source.y)) return;
                 if (!isFiniteNum(target.x) || !isFiniteNum(target.y)) return;
                 
-                // Calculate connection points:
-                // - Outbound: from source workload's top center
-                // - Inbound: to target port's right side
                 const isOutbound = source.data.id === activeWorkloadId;
                 
-                // Source point: top center of workload
-                const sourceHeight = source.height || WORKLOAD_HEADER_HEIGHT;
-                const sourceX = source.x;
-                const sourceY = source.y - sourceHeight / 2;
-                
-                // Target point: right side of port
-                const targetX = target.x + PORT_WIDTH / 2;
+                // Target point: right side of port (accounts for service width)
+                const hasService = target.data.serviceName && target.data.serviceName !== '';
+                const targetPortWidth = hasService ? PORT_WIDTH * 3.5 : PORT_WIDTH;
+                const targetX = target.x + targetPortWidth / 2;
                 const targetY = target.y;
+                
+                // Source point: top or bottom center of workload, whichever is closer to target
+                const sourceHeight = source.height || WORKLOAD_HEADER_HEIGHT;
+                const sourceHalfH = sourceHeight / 2;
+                
+                // Calculate exit point - top or bottom center based on target position
+                let sourceX, sourceY;
+                const dy = targetY - source.y;
+                
+                // Exit from top center or bottom center depending on which is closer
+                sourceX = source.x; // Always center horizontally
+                if (dy > 0) {
+                    // Target is below - exit from bottom center
+                    sourceY = source.y + sourceHalfH;
+                } else {
+                    // Target is above - exit from top center
+                    sourceY = source.y - sourceHalfH;
+                }
                 
                 const start = worldToScreen(sourceX, sourceY);
                 const end = worldToScreen(targetX, targetY);
@@ -835,17 +847,22 @@
                 const opacity = isHovered ? 1 : baseOpacity;
                 const color = isOutbound ? 'rgba(127, 217, 98, ' : 'rgba(255, 143, 64, '; // green outbound, orange inbound
                 
-                // Draw curved line with vertical start
+                // Draw curved line
                 ctx.beginPath();
-                const dx = end.x - start.x;
-                const dy = end.y - start.y;
+                const screenDx = end.x - start.x;
+                const screenDy = end.y - start.y;
                 
-                // Control points for a nice curve
-                // Start going up from source, then curve to target
-                const ctrl1X = start.x;
-                const ctrl1Y = start.y - Math.abs(dy) * 0.3;
-                const ctrl2X = end.x + Math.abs(dx) * 0.3;
-                const ctrl2Y = end.y;
+                // Control points for smooth curve
+                let ctrl1X, ctrl1Y, ctrl2X, ctrl2Y;
+                const curveFactor = 0.4;
+                
+                // Control point 1: extend vertically from source (top or bottom)
+                ctrl1X = start.x;
+                ctrl1Y = start.y + (dy > 0 ? 1 : -1) * Math.abs(screenDy) * curveFactor;
+                
+                // Control point 2: approach target from the right
+                ctrl2X = end.x + Math.abs(screenDx) * curveFactor;
+                ctrl2Y = end.y;
                 
                 if (!isFiniteNum(ctrl1X) || !isFiniteNum(ctrl1Y) || !isFiniteNum(ctrl2X) || !isFiniteNum(ctrl2Y)) return;
                 
@@ -1139,18 +1156,26 @@
             const target = edge.targetNode;
             
             // Use the same coordinates as edge drawing
-            const sourceHeight = source.height || WORKLOAD_HEADER_HEIGHT;
-            const startX = source.x;
-            const startY = source.y - sourceHeight / 2;
-            const endX = target.x + PORT_WIDTH / 2;
+            const hasService = target.data.serviceName && target.data.serviceName !== '';
+            const targetPortWidth = hasService ? PORT_WIDTH * 3.5 : PORT_WIDTH;
+            const endX = target.x + targetPortWidth / 2;
             const endY = target.y;
             
+            // Calculate source exit point (same logic as drawing)
+            const sourceHeight = source.height || WORKLOAD_HEADER_HEIGHT;
+            const sourceHalfH = sourceHeight / 2;
+            
+            const dy = endY - source.y;
+            
+            // Exit from top or bottom center
+            const startX = source.x;
+            const startY = dy > 0 ? source.y + sourceHalfH : source.y - sourceHalfH;
+            
             // Control points (same as drawing)
-            const dx = endX - startX;
-            const dy = endY - startY;
+            const curveFactor = 0.4;
             const ctrl1X = startX;
-            const ctrl1Y = startY - Math.abs(dy) * 0.3;
-            const ctrl2X = endX + Math.abs(dx) * 0.3;
+            const ctrl1Y = startY + (dy > 0 ? 1 : -1) * Math.abs(endY - startY) * curveFactor;
+            const ctrl2X = endX + Math.abs(endX - startX) * curveFactor;
             const ctrl2Y = endY;
             
             // Sample points along the bezier curve and check distance
