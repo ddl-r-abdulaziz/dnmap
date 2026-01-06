@@ -539,7 +539,8 @@
         });
         
         const namespaces = Object.keys(byNamespace).sort();
-        const nodeSpacing = WORKLOAD_WIDTH + 40; // Horizontal spacing
+        const serviceWidth = PORT_WIDTH * 3.5;
+        const nodeSpacing = WORKLOAD_WIDTH + serviceWidth + 40; // Account for service width on right
         const namespaceGap = 80;
         const nodesPerRow = Math.ceil(Math.sqrt(workloadNodes.length / namespaces.length)) + 2;
         
@@ -874,10 +875,13 @@
             if (!isFiniteNum(screen.x) || !isFiniteNum(screen.y)) return;
             
             const isHovered = hoveredNode === node;
+            const hasService = node.data.serviceName && node.data.serviceName !== '';
             
-            const w = PORT_WIDTH * zoom;
+            // Wider port if it has a service name
+            const baseWidth = hasService ? PORT_WIDTH * 3.5 : PORT_WIDTH;
+            const w = baseWidth * zoom;
             const h = PORT_HEIGHT * zoom;
-            const color = colors.port;
+            const color = hasService ? '#82aaff' : colors.port; // Blue for service-backed ports
             
             // Port body
             ctx.beginPath();
@@ -890,14 +894,25 @@
             ctx.lineWidth = isHovered ? 2 : 1;
             ctx.stroke();
             
-            // Port number inside
+            // Port text: show service name if available, otherwise port number
             const fontSize = 9 * zoom;
             if (fontSize >= 5) { // Only show if readable
                 ctx.font = '500 ' + fontSize + 'px JetBrains Mono';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillStyle = color;
-                ctx.fillText(node.data.port || '', screen.x, screen.y);
+                
+                if (hasService) {
+                    // Show just service name, truncate if needed
+                    let label = node.data.serviceName;
+                    const maxWidth = w - 6 * zoom;
+                    while (ctx.measureText(label).width > maxWidth && label.length > 3) {
+                        label = label.slice(0, -2) + '…';
+                    }
+                    ctx.fillText(label, screen.x, screen.y);
+                } else {
+                    ctx.fillText(node.data.port || '', screen.x, screen.y);
+                }
             }
         });
         
@@ -1106,11 +1121,21 @@
             }
             return html;
         } else {
-            return '<div class="tooltip-title">' + data.label + 
-                '<span class="tooltip-badge badge-port">Port</span></div>' +
+            const isService = data.serviceName && data.serviceName !== '';
+            const badgeLabel = isService ? 'Service' : 'Port';
+            const title = isService ? data.serviceName : data.label;
+            
+            let html = '<div class="tooltip-title">' + title + 
+                '<span class="tooltip-badge badge-port">' + badgeLabel + '</span></div>' +
                 '<div class="tooltip-row"><span class="tooltip-label">Port</span><span class="tooltip-value">' + data.port + '</span></div>' +
-                '<div class="tooltip-row"><span class="tooltip-label">Protocol</span><span class="tooltip-value">' + data.protocol + '</span></div>' +
-                '<div class="tooltip-row"><span class="tooltip-label">Parent</span><span class="tooltip-value">' + data.parent + '</span></div>';
+                '<div class="tooltip-row"><span class="tooltip-label">Protocol</span><span class="tooltip-value">' + data.protocol + '</span></div>';
+            
+            if (isService && data.servicePort && data.servicePort !== data.port) {
+                html += '<div class="tooltip-row"><span class="tooltip-label">Service Port</span><span class="tooltip-value">' + data.servicePort + '</span></div>';
+            }
+            
+            html += '<div class="tooltip-row"><span class="tooltip-label">Workload</span><span class="tooltip-value">' + data.parent + '</span></div>';
+            return html;
         }
     }
     
@@ -1129,20 +1154,26 @@
         return portNodes.filter(p => p.data.parent === workloadNode.data.id);
     }
     
-    // Update port positions relative to their parent workload (inside, below header, right-aligned)
+    // Update port positions relative to their parent workload
+    // Both services and ports on right side, right-aligned, hanging outside
     function updatePortPositions(workloadNode) {
         const ports = getPortsForWorkload(workloadNode);
         const portCount = ports.length || 1;
         
-        // Update workload height based on port count
         updateWorkloadHeight(workloadNode, portCount);
         
-        // Position ports inside workload, below header, on the right side
         const startY = workloadNode.y - workloadNode.height / 2 + WORKLOAD_HEADER_HEIGHT + PORT_HEIGHT / 2;
         
+        // Right alignment point: workload right edge + 50% of port width
+        const rightAlignX = workloadNode.x + WORKLOAD_WIDTH / 2 + PORT_WIDTH * 0.5;
+        const serviceWidth = PORT_WIDTH * 3.5;
+        
         ports.forEach((portNode, idx) => {
-            // Right-aligned inside the workload, overlapping the right edge
-            portNode.x = workloadNode.x + WORKLOAD_WIDTH / 2 - PORT_WIDTH / 2 + 4;
+            const hasService = portNode.data.serviceName && portNode.data.serviceName !== '';
+            const nodeWidth = hasService ? serviceWidth : PORT_WIDTH;
+            
+            // Position so right edge aligns with rightAlignX
+            portNode.x = rightAlignX - nodeWidth / 2;
             portNode.y = startY + idx * (PORT_HEIGHT + PORT_GAP);
         });
     }

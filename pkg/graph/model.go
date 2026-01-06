@@ -13,15 +13,17 @@ const (
 
 // Node represents a node in the network graph.
 type Node struct {
-	ID        string            `json:"id"`
-	Label     string            `json:"label"`
-	Type      NodeType          `json:"type"`
-	Namespace string            `json:"namespace"`
-	Kind      string            `json:"kind"` // For workload nodes: Deployment, StatefulSet, etc.
-	Parent    string            `json:"parent,omitempty"` // For port nodes: the parent workload ID
-	Port      int32             `json:"port,omitempty"`
-	Protocol  string            `json:"protocol,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	ID          string            `json:"id"`
+	Label       string            `json:"label"`
+	Type        NodeType          `json:"type"`
+	Namespace   string            `json:"namespace"`
+	Kind        string            `json:"kind"` // For workload nodes: Deployment, StatefulSet, etc.
+	Parent      string            `json:"parent,omitempty"` // For port nodes: the parent workload ID
+	Port        int32             `json:"port,omitempty"`
+	Protocol    string            `json:"protocol,omitempty"`
+	ServiceName string            `json:"serviceName,omitempty"` // For port nodes: the K8s Service name
+	ServicePort int32             `json:"servicePort,omitempty"` // For port nodes: the service port
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // Edge represents a connection between nodes in the network graph.
@@ -92,12 +94,14 @@ func NewPortNode(workloadID string, p k8s.Port) Node {
 	}
 	
 	return Node{
-		ID:       PortID(workloadID, p.ContainerPort, protocol),
-		Label:    label,
-		Type:     NodeTypePort,
-		Parent:   workloadID,
-		Port:     p.ContainerPort,
-		Protocol: protocol,
+		ID:          PortID(workloadID, p.ContainerPort, protocol),
+		Label:       label,
+		Type:        NodeTypePort,
+		Parent:      workloadID,
+		Port:        p.ContainerPort,
+		Protocol:    protocol,
+		ServiceName: p.ServiceName,
+		ServicePort: p.ServicePort,
 	}
 }
 

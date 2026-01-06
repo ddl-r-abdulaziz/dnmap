@@ -36,6 +36,8 @@ type Port struct {
 	Name          string
 	ContainerPort int32
 	Protocol      corev1.Protocol
+	ServiceName   string // Name of the K8s Service exposing this port, if any
+	ServicePort   int32  // The service port number, if different from container port
 }
 
 // Workload represents a Kubernetes workload (Deployment, StatefulSet, DaemonSet, or standalone Pod).
@@ -162,13 +164,21 @@ func (c *Client) GetWorkloads(namespaces []string) ([]Workload, error) {
 	var workloads []Workload
 
 	for _, ns := range namespaces {
+		// Get Services first to map them to workloads
+		services, err := c.k8sClientset.CoreV1().Services(ns).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to list services in namespace %s: %w", ns, err)
+		}
+
 		// Get Deployments
 		deployments, err := c.k8sClientset.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to list deployments in namespace %s: %w", ns, err)
 		}
 		for _, d := range deployments.Items {
-			workloads = append(workloads, deploymentToWorkload(d))
+			w := deploymentToWorkload(d)
+			enrichPortsWithServices(&w, services.Items)
+			workloads = append(workloads, w)
 		}
 
 		// Get StatefulSets
@@ -177,7 +187,9 @@ func (c *Client) GetWorkloads(namespaces []string) ([]Workload, error) {
 			return nil, fmt.Errorf("failed to list statefulsets in namespace %s: %w", ns, err)
 		}
 		for _, s := range statefulSets.Items {
-			workloads = append(workloads, statefulSetToWorkload(s))
+			w := statefulSetToWorkload(s)
+			enrichPortsWithServices(&w, services.Items)
+			workloads = append(workloads, w)
 		}
 
 		// Get DaemonSets
@@ -186,11 +198,52 @@ func (c *Client) GetWorkloads(namespaces []string) ([]Workload, error) {
 			return nil, fmt.Errorf("failed to list daemonsets in namespace %s: %w", ns, err)
 		}
 		for _, ds := range daemonSets.Items {
-			workloads = append(workloads, daemonSetToWorkload(ds))
+			w := daemonSetToWorkload(ds)
+			enrichPortsWithServices(&w, services.Items)
+			workloads = append(workloads, w)
 		}
 	}
 
 	return workloads, nil
+}
+
+// enrichPortsWithServices adds service information to workload ports.
+func enrichPortsWithServices(w *Workload, services []corev1.Service) {
+	for i := range w.Ports {
+		port := &w.Ports[i]
+		for _, svc := range services {
+			// Check if service selector matches workload labels
+			if !labelsMatch(svc.Spec.Selector, w.Labels) {
+				continue
+			}
+			// Find matching port in service
+			for _, sp := range svc.Spec.Ports {
+				// Match by target port (can be port number or port name)
+				if sp.TargetPort.IntVal == port.ContainerPort ||
+					(sp.TargetPort.StrVal != "" && sp.TargetPort.StrVal == port.Name) {
+					port.ServiceName = svc.Name
+					port.ServicePort = sp.Port
+					break
+				}
+			}
+			if port.ServiceName != "" {
+				break // Found a service for this port
+			}
+		}
+	}
+}
+
+// labelsMatch checks if all selector labels match the workload labels.
+func labelsMatch(selector, labels map[string]string) bool {
+	if len(selector) == 0 {
+		return false
+	}
+	for k, v := range selector {
+		if labels[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // GetPolicies fetches all network policies (K8s and Istio) from the specified namespaces.
