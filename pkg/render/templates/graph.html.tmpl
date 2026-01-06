@@ -1046,48 +1046,77 @@
     function findEdgeAt(x, y) {
         const world = screenToWorld(x, y);
         
-        for (const edge of edges) {
+        // Only check edges that are currently visible
+        const visibleEdges = getVisibleEdges();
+        
+        for (const edge of visibleEdges) {
             const source = edge.sourceNode;
             const target = edge.targetNode;
             
-            // Simple distance check to curved line
-            const midX = (source.x + target.x) / 2;
-            const midY = (source.y + target.y) / 2;
+            // Use the same coordinates as edge drawing
+            const sourceHeight = source.height || WORKLOAD_HEADER_HEIGHT;
+            const startX = source.x;
+            const startY = source.y - sourceHeight / 2;
+            const endX = target.x + PORT_WIDTH / 2;
+            const endY = target.y;
             
-            const dist = Math.sqrt(Math.pow(world.x - midX, 2) + Math.pow(world.y - midY, 2));
-            const lineLen = Math.sqrt(Math.pow(target.x - source.x, 2) + Math.pow(target.y - source.y, 2));
+            // Control points (same as drawing)
+            const dx = endX - startX;
+            const dy = endY - startY;
+            const ctrl1X = startX;
+            const ctrl1Y = startY - Math.abs(dy) * 0.3;
+            const ctrl2X = endX + Math.abs(dx) * 0.3;
+            const ctrl2Y = endY;
             
-            if (dist < lineLen / 2) {
-                // More precise check using point-to-line distance
-                const A = world.x - source.x;
-                const B = world.y - source.y;
-                const C = target.x - source.x;
-                const D = target.y - source.y;
-                
-                const dot = A * C + B * D;
-                const lenSq = C * C + D * D;
-                const param = lenSq !== 0 ? dot / lenSq : -1;
-                
-                let xx, yy;
-                if (param < 0) {
-                    xx = source.x; yy = source.y;
-                } else if (param > 1) {
-                    xx = target.x; yy = target.y;
-                } else {
-                    xx = source.x + param * C;
-                    yy = source.y + param * D;
-                }
-                
-                const dx = world.x - xx;
-                const dy = world.y - yy;
-                const pointDist = Math.sqrt(dx * dx + dy * dy);
-                
-                if (pointDist < 15) {
+            // Sample points along the bezier curve and check distance
+            const threshold = 15 / zoom; // Adjust threshold based on zoom
+            for (let t = 0; t <= 1; t += 0.05) {
+                const pt = bezierPoint(startX, startY, ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, endY, t);
+                const dist = Math.sqrt(Math.pow(world.x - pt.x, 2) + Math.pow(world.y - pt.y, 2));
+                if (dist < threshold) {
                     return edge;
                 }
             }
         }
         return null;
+    }
+    
+    // Calculate point on cubic bezier curve at t
+    function bezierPoint(x0, y0, x1, y1, x2, y2, x3, y3, t) {
+        const mt = 1 - t;
+        const mt2 = mt * mt;
+        const mt3 = mt2 * mt;
+        const t2 = t * t;
+        const t3 = t2 * t;
+        return {
+            x: mt3 * x0 + 3 * mt2 * t * x1 + 3 * mt * t2 * x2 + t3 * x3,
+            y: mt3 * y0 + 3 * mt2 * t * y1 + 3 * mt * t2 * y2 + t3 * y3
+        };
+    }
+    
+    // Get currently visible edges based on selection/hover state
+    function getVisibleEdges() {
+        const visible = [];
+        
+        // Check selected node
+        if (selectedNode) {
+            if (selectedNode.data.type === 'workload') {
+                edges.forEach(e => {
+                    if (e.sourceNode.data.id === selectedNode.data.id || 
+                        e.targetNode.data.parent === selectedNode.data.id) {
+                        visible.push(e);
+                    }
+                });
+            } else if (selectedNode.data.type === 'port') {
+                edges.forEach(e => {
+                    if (e.targetNode.data.id === selectedNode.data.id) {
+                        visible.push(e);
+                    }
+                });
+            }
+        }
+        
+        return visible;
     }
     
     function showTooltip(x, y, content) {
