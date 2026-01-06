@@ -397,6 +397,196 @@
         .policy-yaml .number {
             color: var(--accent-purple);
         }
+        
+        .warning-dialog-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 300;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .warning-dialog-overlay.open {
+            display: flex;
+        }
+        
+        .warning-dialog {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 900px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+        
+        .warning-dialog-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-primary);
+            border-radius: 12px 12px 0 0;
+        }
+        
+        .warning-dialog-title {
+            font-weight: 600;
+            font-size: 16px;
+            color: var(--accent-yellow);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .warning-dialog-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 28px;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+        
+        .warning-dialog-close:hover {
+            color: var(--text-primary);
+        }
+        
+        .warning-dialog-content {
+            flex: 1;
+            overflow: auto;
+            padding: 0;
+        }
+        
+        .warning-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        
+        .warning-table th {
+            background: var(--bg-tertiary);
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.05em;
+            position: sticky;
+            top: 0;
+        }
+        
+        .warning-table td {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+        
+        .warning-table tr:hover td {
+            background: var(--bg-tertiary);
+        }
+        
+        .warning-type-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .warning-type-badge.no-ports {
+            background: rgba(199, 146, 234, 0.2);
+            color: var(--accent-purple);
+        }
+        
+        .warning-type-badge.no-selector {
+            background: rgba(255, 143, 64, 0.2);
+            color: var(--accent-orange);
+        }
+        
+        .warning-empty {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-secondary);
+        }
+        
+        .warning-empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        .warning-table th.sortable {
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        
+        .warning-table th.sortable:hover {
+            background: var(--border-color);
+        }
+        
+        .warning-table th .sort-icon {
+            margin-left: 6px;
+            opacity: 0.4;
+        }
+        
+        .warning-table th.sorted .sort-icon {
+            opacity: 1;
+            color: var(--accent-cyan);
+        }
+        
+        .warning-filters {
+            display: flex;
+            gap: 16px;
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .warning-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .warning-filter label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .warning-filter select {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            padding: 6px 10px;
+            font-size: 13px;
+            font-family: 'Outfit', sans-serif;
+            cursor: pointer;
+        }
+        
+        .warning-filter select:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+        }
+        
+        .warning-count {
+            margin-left: auto;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
     </style>
 </head>
 <body>
@@ -437,6 +627,7 @@
             <button class="btn" onclick="clearSelection()">Clear Selection</button>
             <button class="btn" id="hover-edges-btn" onclick="toggleHoverEdges()">Hover Edges: ON</button>
             <button class="btn" id="warnings-btn" onclick="toggleWarnings()">Warnings: OFF</button>
+            <button class="btn" onclick="openWarningReport()">Warning Report</button>
             <button class="btn" onclick="resetView()">Reset View</button>
             <button class="btn" onclick="reLayout()">Re-Layout</button>
             <button class="btn btn-primary" onclick="exportPNG()">Export PNG</button>
@@ -489,6 +680,20 @@
         </div>
         <div class="policy-panel-content">
             <pre class="policy-yaml" id="policy-yaml"></pre>
+        </div>
+    </div>
+    
+    <div class="warning-dialog-overlay" id="warning-dialog-overlay" onclick="closeWarningReport(event)">
+        <div class="warning-dialog" onclick="event.stopPropagation()">
+            <div class="warning-dialog-header">
+                <span class="warning-dialog-title">
+                    <span style="color: #ffcc00;">⚠</span> Policy Warnings Report
+                </span>
+                <button class="warning-dialog-close" onclick="closeWarningReport()">×</button>
+            </div>
+            <div class="warning-dialog-content" id="warning-dialog-content">
+                <!-- Table will be populated by JavaScript -->
+            </div>
         </div>
     </div>
     
@@ -1581,6 +1786,127 @@
     function toggleWarnings() {
         showWarnings = !showWarnings;
         document.getElementById('warnings-btn').textContent = 'Warnings: ' + (showWarnings ? 'ON' : 'OFF');
+    }
+    
+    // Warning report state
+    let warningReportSort = { column: 'workloadName', direction: 'asc' };
+    let warningReportFilters = { namespace: '', warningType: '' };
+    
+    function openWarningReport() {
+        renderWarningReport();
+        document.getElementById('warning-dialog-overlay').classList.add('open');
+    }
+    
+    function renderWarningReport() {
+        const content = document.getElementById('warning-dialog-content');
+        const allWarnings = graphData.warningDetails || [];
+        
+        if (allWarnings.length === 0) {
+            content.innerHTML = '<div class="warning-empty"><div class="warning-empty-icon">✓</div><div>No policy warnings found.<br>All policies have proper port and selector restrictions.</div></div>';
+            return;
+        }
+        
+        // Get unique values for filters
+        const namespaces = [...new Set(allWarnings.map(w => w.namespace))].sort();
+        const warningTypes = [...new Set(allWarnings.map(w => w.warningType))].sort();
+        
+        // Apply filters
+        let filtered = allWarnings.filter(w => {
+            if (warningReportFilters.namespace && w.namespace !== warningReportFilters.namespace) return false;
+            if (warningReportFilters.warningType && w.warningType !== warningReportFilters.warningType) return false;
+            return true;
+        });
+        
+        // Apply sort
+        filtered.sort((a, b) => {
+            let aVal, bVal;
+            switch (warningReportSort.column) {
+                case 'workloadName': aVal = a.workloadName; bVal = b.workloadName; break;
+                case 'namespace': aVal = a.namespace; bVal = b.namespace; break;
+                case 'policyName': aVal = a.policyName.split('/').pop(); bVal = b.policyName.split('/').pop(); break;
+                case 'warningType': aVal = a.warningType; bVal = b.warningType; break;
+                default: aVal = a.workloadName; bVal = b.workloadName;
+            }
+            const cmp = aVal.localeCompare(bVal);
+            return warningReportSort.direction === 'asc' ? cmp : -cmp;
+        });
+        
+        // Build filters HTML
+        let html = '<div class="warning-filters">';
+        html += '<div class="warning-filter"><label>Namespace:</label><select onchange="setWarningFilter(\'namespace\', this.value)">';
+        html += '<option value="">All</option>';
+        namespaces.forEach(ns => {
+            const selected = warningReportFilters.namespace === ns ? ' selected' : '';
+            html += '<option value="' + ns + '"' + selected + '>' + ns + '</option>';
+        });
+        html += '</select></div>';
+        
+        html += '<div class="warning-filter"><label>Warning:</label><select onchange="setWarningFilter(\'warningType\', this.value)">';
+        html += '<option value="">All</option>';
+        warningTypes.forEach(wt => {
+            const selected = warningReportFilters.warningType === wt ? ' selected' : '';
+            const label = wt === 'no-ports' ? 'No Port Restriction' : 'No Selector';
+            html += '<option value="' + wt + '"' + selected + '>' + label + '</option>';
+        });
+        html += '</select></div>';
+        
+        html += '<div class="warning-count">Showing ' + filtered.length + ' of ' + allWarnings.length + ' warnings</div>';
+        html += '</div>';
+        
+        // Build table HTML
+        html += '<table class="warning-table"><thead><tr>';
+        html += buildSortHeader('workloadName', 'Workload');
+        html += buildSortHeader('namespace', 'Namespace');
+        html += buildSortHeader('policyName', 'Policy');
+        html += buildSortHeader('warningType', 'Warning');
+        html += '</tr></thead><tbody>';
+        
+        if (filtered.length === 0) {
+            html += '<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 20px;">No warnings match the current filters</td></tr>';
+        } else {
+            filtered.forEach(w => {
+                const warningClass = w.warningType === 'no-ports' ? 'no-ports' : 'no-selector';
+                const warningLabel = w.warningType === 'no-ports' ? 'No Port Restriction' : 'No Selector';
+                const policyShortName = w.policyName.split('/').pop(); // Remove namespace prefix
+                html += '<tr>';
+                html += '<td><strong>' + w.workloadName + '</strong></td>';
+                html += '<td>' + w.namespace + '</td>';
+                html += '<td><code style="font-size: 11px;">' + policyShortName + '</code></td>';
+                html += '<td><span class="warning-type-badge ' + warningClass + '">' + warningLabel + '</span></td>';
+                html += '</tr>';
+            });
+        }
+        
+        html += '</tbody></table>';
+        content.innerHTML = html;
+    }
+    
+    function buildSortHeader(column, label) {
+        const isSorted = warningReportSort.column === column;
+        const sortedClass = isSorted ? ' sorted' : '';
+        const icon = isSorted ? (warningReportSort.direction === 'asc' ? '↑' : '↓') : '↕';
+        return '<th class="sortable' + sortedClass + '" onclick="setWarningSort(\'' + column + '\')">' + label + '<span class="sort-icon">' + icon + '</span></th>';
+    }
+    
+    function setWarningSort(column) {
+        if (warningReportSort.column === column) {
+            warningReportSort.direction = warningReportSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            warningReportSort.column = column;
+            warningReportSort.direction = 'asc';
+        }
+        renderWarningReport();
+    }
+    
+    function setWarningFilter(filterName, value) {
+        warningReportFilters[filterName] = value;
+        renderWarningReport();
+    }
+    
+    function closeWarningReport(event) {
+        if (!event || event.target === document.getElementById('warning-dialog-overlay')) {
+            document.getElementById('warning-dialog-overlay').classList.remove('open');
+        }
     }
     
     function resetView() {

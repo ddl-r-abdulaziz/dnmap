@@ -33,8 +33,9 @@ func (b *Builder) WithNamespaceLabels(namespaces []k8s.NamespaceInfo) *Builder {
 // Build constructs a NetworkGraph from workloads and policies.
 func (b *Builder) Build(workloads []k8s.Workload, policies []k8s.Policy) *NetworkGraph {
 	graph := &NetworkGraph{
-		Nodes: make([]Node, 0),
-		Edges: make([]Edge, 0),
+		Nodes:          make([]Node, 0),
+		Edges:          make([]Edge, 0),
+		WarningDetails: make([]WarningDetail, 0),
 	}
 
 	// Build maps for quick lookup
@@ -43,7 +44,7 @@ func (b *Builder) Build(workloads []k8s.Workload, policies []k8s.Policy) *Networ
 	portNodes := make(map[string]Node)               // portID -> Node
 	nodeIndex := make(map[string]int)                // nodeID -> index in graph.Nodes
 
-	// Track warnings per workload
+	// Track warnings per workload (for node-level display)
 	workloadWarnings := make(map[string]map[WarningType]bool) // workloadID -> set of warnings
 
 	// Create nodes for each workload and its ports
@@ -71,9 +72,10 @@ func (b *Builder) Build(workloads []k8s.Workload, policies []k8s.Policy) *Networ
 		switch policy.Type {
 		case k8s.PolicyTypeK8sNetworkPolicy:
 			if policy.K8sNetworkPolicy != nil {
-				edges, warnings := b.processK8sNetworkPolicyWithWarnings(policy.K8sNetworkPolicy, workloadsByNS, &edgeID)
+				edges, warnings, details := b.processK8sNetworkPolicyWithWarnings(policy.K8sNetworkPolicy, workloadsByNS, workloadMap, &edgeID)
 				graph.Edges = append(graph.Edges, edges...)
-				// Merge warnings
+				graph.WarningDetails = append(graph.WarningDetails, details...)
+				// Merge warnings for node display
 				for wID, warnSet := range warnings {
 					for warn := range warnSet {
 						workloadWarnings[wID][warn] = true
@@ -183,10 +185,13 @@ func (b *Builder) processK8sNetworkPolicy(policy *networkingv1.NetworkPolicy, wo
 	return edges
 }
 
-// processK8sNetworkPolicyWithWarnings processes a K8s NetworkPolicy and returns edges and warnings.
-func (b *Builder) processK8sNetworkPolicyWithWarnings(policy *networkingv1.NetworkPolicy, workloadsByNS map[string][]k8s.Workload, edgeID *int) ([]Edge, map[string]map[WarningType]bool) {
+// processK8sNetworkPolicyWithWarnings processes a K8s NetworkPolicy and returns edges, warnings, and warning details.
+func (b *Builder) processK8sNetworkPolicyWithWarnings(policy *networkingv1.NetworkPolicy, workloadsByNS map[string][]k8s.Workload, workloadMap map[string]k8s.Workload, edgeID *int) ([]Edge, map[string]map[WarningType]bool, []WarningDetail) {
 	var edges []Edge
+	var warningDetails []WarningDetail
 	warnings := make(map[string]map[WarningType]bool)
+
+	policyFullName := policy.Namespace + "/" + policy.Name
 
 	// Find workloads that this policy applies to (targets)
 	targetWorkloads := b.findMatchingWorkloads(policy.Namespace, policy.Spec.PodSelector, workloadsByNS)
@@ -212,12 +217,30 @@ func (b *Builder) processK8sNetworkPolicyWithWarnings(policy *networkingv1.Netwo
 		for _, targetW := range targetWorkloads {
 			targetWID := WorkloadID(targetW.Namespace, targetW.Name)
 
-			// Add warnings for this workload
+			// Add warnings for this workload and collect details
 			if hasNoPorts {
-				warnings[targetWID][WarningNoPorts] = true
+				if !warnings[targetWID][WarningNoPorts] {
+					warnings[targetWID][WarningNoPorts] = true
+					warningDetails = append(warningDetails, WarningDetail{
+						WorkloadID:   targetWID,
+						WorkloadName: targetW.Name,
+						Namespace:    targetW.Namespace,
+						PolicyName:   policyFullName,
+						WarningType:  WarningNoPorts,
+					})
+				}
 			}
 			if hasNoSelector {
-				warnings[targetWID][WarningNoSelector] = true
+				if !warnings[targetWID][WarningNoSelector] {
+					warnings[targetWID][WarningNoSelector] = true
+					warningDetails = append(warningDetails, WarningDetail{
+						WorkloadID:   targetWID,
+						WorkloadName: targetW.Name,
+						Namespace:    targetW.Namespace,
+						PolicyName:   policyFullName,
+						WarningType:  WarningNoSelector,
+					})
+				}
 			}
 
 			// Determine which ports are allowed
@@ -253,7 +276,7 @@ func (b *Builder) processK8sNetworkPolicyWithWarnings(policy *networkingv1.Netwo
 						Target:     portID,
 						Label:      fmt.Sprintf("%s:%d", protocol, port.ContainerPort),
 						Rule:       b.formatK8sRule(ingressRule, ruleIdx),
-						Policy:     policy.Namespace + "/" + policy.Name,
+						Policy:     policyFullName,
 						PolicyYAML: policyYAML,
 						Metadata: map[string]string{
 							"policyType": "NetworkPolicy",
@@ -267,7 +290,7 @@ func (b *Builder) processK8sNetworkPolicyWithWarnings(policy *networkingv1.Netwo
 		}
 	}
 
-	return edges, warnings
+	return edges, warnings, warningDetails
 }
 
 // processIstioAuthPolicy processes an Istio AuthorizationPolicy and returns edges.

@@ -49,10 +49,20 @@ type Edge struct {
 	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
+// WarningDetail provides detailed information about a policy warning.
+type WarningDetail struct {
+	WorkloadID   string      `json:"workloadId"`
+	WorkloadName string      `json:"workloadName"`
+	Namespace    string      `json:"namespace"`
+	PolicyName   string      `json:"policyName"`
+	WarningType  WarningType `json:"warningType"`
+}
+
 // NetworkGraph represents the complete network graph.
 type NetworkGraph struct {
-	Nodes []Node `json:"nodes"`
-	Edges []Edge `json:"edges"`
+	Nodes          []Node          `json:"nodes"`
+	Edges          []Edge          `json:"edges"`
+	WarningDetails []WarningDetail `json:"warningDetails,omitempty"`
 }
 
 // WorkloadID generates a unique ID for a workload node.
