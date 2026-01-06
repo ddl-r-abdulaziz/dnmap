@@ -360,6 +360,7 @@
         
         <div class="controls">
             <button class="btn" onclick="clearSelection()">Clear Selection</button>
+            <button class="btn" id="hover-edges-btn" onclick="toggleHoverEdges()">Hover Edges: ON</button>
             <button class="btn" onclick="resetView()">Reset View</button>
             <button class="btn" onclick="reLayout()">Re-Layout</button>
             <button class="btn btn-primary" onclick="exportPNG()">Export PNG</button>
@@ -634,6 +635,7 @@
     let hoveredEdge = null;
     let searchTerm = '';
     let selectedNode = null; // Currently selected workload
+    let showEdgesOnHover = true; // Toggle for hover edge preview
     
     let frameCount = 0;
     function draw() {
@@ -672,11 +674,11 @@
         }
         ctx.stroke();
         
-        // Draw edges for selected node and/or dragged node
-        const draggedNode = (isDragging && dragNode) ? dragNode : null;
+        // Draw edges for selected node and/or hovered node (if enabled)
+        const hoveredWorkload = (showEdgesOnHover && hoveredNode && hoveredNode.data.type === 'workload') ? hoveredNode : null;
         const nodesToShowEdges = [];
         if (selectedNode) nodesToShowEdges.push({ node: selectedNode, transparent: false });
-        if (draggedNode && draggedNode !== selectedNode) nodesToShowEdges.push({ node: draggedNode, transparent: true });
+        if (hoveredWorkload && hoveredWorkload !== selectedNode) nodesToShowEdges.push({ node: hoveredWorkload, transparent: true });
         
         nodesToShowEdges.forEach(({ node: activeNode, transparent }) => {
             const activeWorkloadId = activeNode.data.id;
@@ -1182,6 +1184,8 @@
             dragNode.y = world.y + dragOffsetY;
             // Move ports with the workload
             updatePortPositions(dragNode);
+            // Keep dragNode as hovered during drag
+            hoveredNode = dragNode;
         } else if (isPanning) {
             panX += x - lastMouseX;
             panY += y - lastMouseY;
@@ -1279,6 +1283,11 @@
     function clearSelection() {
         selectedNode = null;
         updateSelectionInfo();
+    }
+    
+    function toggleHoverEdges() {
+        showEdgesOnHover = !showEdgesOnHover;
+        document.getElementById('hover-edges-btn').textContent = 'Hover Edges: ' + (showEdgesOnHover ? 'ON' : 'OFF');
     }
     
     function resetView() {
