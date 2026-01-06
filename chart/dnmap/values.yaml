@@ -39,6 +39,22 @@ service:
   type: ClusterIP
   port: 8080
 
+# Ingress configuration
+ingress:
+  enabled: true
+  className: nginx
+  # Host should be set to your cluster's domain
+  # e.g., rash-side-c.infra-team-sandbox.domino.tech
+  host: ""
+  path: /dnmap
+  annotations: {}
+  tls: []
+
+# Network policy configuration
+networkPolicy:
+  # Allow prometheus to scrape metrics
+  allowPrometheus: true
+
 # Resource limits
 resources:
   limits:

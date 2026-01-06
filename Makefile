@@ -86,14 +86,22 @@ image-publish: image-buildx ## Build and push multi-arch container image
 
 HELM_RELEASE ?= dnmap
 HELM_NAMESPACE ?= domino-platform
+# Auto-detect ingress host from cluster if not set
+INGRESS_HOST ?= $(shell kubectl get ingress -n $(HELM_NAMESPACE) -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null)
 
 .PHONY: deploy
 deploy: ## Deploy to current Kubernetes cluster using Helm
+	@if [ -z "$(INGRESS_HOST)" ]; then \
+		echo "Error: Could not detect INGRESS_HOST. Set it manually: make deploy INGRESS_HOST=your-cluster.domain.com"; \
+		exit 1; \
+	fi
+	@echo "Deploying to $(HELM_NAMESPACE) with ingress host: $(INGRESS_HOST)"
 	helm upgrade --install $(HELM_RELEASE) ./chart/dnmap \
 		--namespace $(HELM_NAMESPACE) \
 		--create-namespace \
 		--set image.repository=$(IMAGE_REGISTRY)/$(IMAGE_REPO) \
-		--set image.tag=$(IMAGE_TAG)
+		--set image.tag=$(IMAGE_TAG) \
+		--set ingress.host=$(INGRESS_HOST)
 
 .PHONY: undeploy
 undeploy: ## Remove deployment from Kubernetes cluster
