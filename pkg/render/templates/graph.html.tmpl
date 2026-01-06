@@ -709,17 +709,22 @@
         }
         ctx.stroke();
         
-        // Draw edges - only if a workload is selected
-        if (selectedNode) {
-            const selectedWorkloadId = selectedNode.data.id;
+        // Draw edges for selected node and/or dragged node
+        const draggedNode = (isDragging && dragNode) ? dragNode : null;
+        const nodesToShowEdges = [];
+        if (selectedNode) nodesToShowEdges.push({ node: selectedNode, transparent: false });
+        if (draggedNode && draggedNode !== selectedNode) nodesToShowEdges.push({ node: draggedNode, transparent: true });
+        
+        nodesToShowEdges.forEach(({ node: activeNode, transparent }) => {
+            const activeWorkloadId = activeNode.data.id;
             
             edges.forEach(edge => {
                 const source = edge.sourceNode;
                 const target = edge.targetNode;
                 
-                // Only show edges connected to the selected workload
+                // Only show edges connected to this workload
                 const targetParentId = target.data.parent;
-                const isConnected = (source.data.id === selectedWorkloadId) || (targetParentId === selectedWorkloadId);
+                const isConnected = (source.data.id === activeWorkloadId) || (targetParentId === activeWorkloadId);
                 if (!isConnected) return;
                 
                 // Skip if source or target nodes are invalid
@@ -734,10 +739,11 @@
                 if (!isFiniteNum(start.x) || !isFiniteNum(start.y)) return;
                 if (!isFiniteNum(end.x) || !isFiniteNum(end.y)) return;
                 
-                // Color based on direction: outbound (from selected) vs inbound (to selected)
-                const isOutbound = source.data.id === selectedWorkloadId;
+                // Color based on direction: outbound (from active) vs inbound (to active)
+                const isOutbound = source.data.id === activeWorkloadId;
                 const isHovered = hoveredEdge === edge;
-                const opacity = isHovered ? 1 : 0.6;
+                const baseOpacity = transparent ? 0.3 : 0.6;
+                const opacity = isHovered ? 1 : baseOpacity;
                 const color = isOutbound ? 'rgba(127, 217, 98, ' : 'rgba(255, 143, 64, '; // green outbound, orange inbound
                 
                 // Draw curved line
@@ -757,10 +763,10 @@
                 ctx.moveTo(start.x, start.y);
                 ctx.quadraticCurveTo(ctrlX, ctrlY, end.x, end.y);
                 ctx.strokeStyle = isHovered ? color + '1)' : color + opacity + ')';
-                ctx.lineWidth = isHovered ? 3 : 2;
+                ctx.lineWidth = isHovered ? 3 : (transparent ? 1.5 : 2);
                 ctx.stroke();
             });
-        }
+        });
         
         // Draw port-to-parent connections
         portNodes.forEach(portNode => {
