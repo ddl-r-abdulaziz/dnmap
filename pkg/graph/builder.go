@@ -41,14 +41,20 @@ func (b *Builder) Build(workloads []k8s.Workload, policies []k8s.Policy) *Networ
 	workloadMap := make(map[string]k8s.Workload)     // workloadID -> Workload
 	workloadsByNS := make(map[string][]k8s.Workload) // namespace -> []Workload
 	portNodes := make(map[string]Node)               // portID -> Node
+	nodeIndex := make(map[string]int)                // nodeID -> index in graph.Nodes
+
+	// Track warnings per workload
+	workloadWarnings := make(map[string]map[WarningType]bool) // workloadID -> set of warnings
 
 	// Create nodes for each workload and its ports
 	for _, w := range workloads {
 		wID := WorkloadID(w.Namespace, w.Name)
 		workloadMap[wID] = w
 		workloadsByNS[w.Namespace] = append(workloadsByNS[w.Namespace], w)
+		workloadWarnings[wID] = make(map[WarningType]bool)
 
 		// Add workload node
+		nodeIndex[wID] = len(graph.Nodes)
 		graph.Nodes = append(graph.Nodes, NewWorkloadNode(w))
 
 		// Add port nodes
@@ -59,20 +65,37 @@ func (b *Builder) Build(workloads []k8s.Workload, policies []k8s.Policy) *Networ
 		}
 	}
 
-	// Process policies to create edges
+	// Process policies to create edges and detect warnings
 	edgeID := 0
 	for _, policy := range policies {
 		switch policy.Type {
 		case k8s.PolicyTypeK8sNetworkPolicy:
 			if policy.K8sNetworkPolicy != nil {
-				edges := b.processK8sNetworkPolicy(policy.K8sNetworkPolicy, workloadsByNS, &edgeID)
+				edges, warnings := b.processK8sNetworkPolicyWithWarnings(policy.K8sNetworkPolicy, workloadsByNS, &edgeID)
 				graph.Edges = append(graph.Edges, edges...)
+				// Merge warnings
+				for wID, warnSet := range warnings {
+					for warn := range warnSet {
+						workloadWarnings[wID][warn] = true
+					}
+				}
 			}
 		case k8s.PolicyTypeIstioAuthorizationPolicy:
 			if policy.IstioAuthPolicy != nil {
 				edges := b.processIstioAuthPolicy(policy.IstioAuthPolicy, workloadsByNS, &edgeID)
 				graph.Edges = append(graph.Edges, edges...)
 			}
+		}
+	}
+
+	// Apply warnings to workload nodes
+	for wID, warnSet := range workloadWarnings {
+		if idx, ok := nodeIndex[wID]; ok && len(warnSet) > 0 {
+			warnings := make([]WarningType, 0, len(warnSet))
+			for warn := range warnSet {
+				warnings = append(warnings, warn)
+			}
+			graph.Nodes[idx].Warnings = warnings
 		}
 	}
 
@@ -158,6 +181,93 @@ func (b *Builder) processK8sNetworkPolicy(policy *networkingv1.NetworkPolicy, wo
 	}
 
 	return edges
+}
+
+// processK8sNetworkPolicyWithWarnings processes a K8s NetworkPolicy and returns edges and warnings.
+func (b *Builder) processK8sNetworkPolicyWithWarnings(policy *networkingv1.NetworkPolicy, workloadsByNS map[string][]k8s.Workload, edgeID *int) ([]Edge, map[string]map[WarningType]bool) {
+	var edges []Edge
+	warnings := make(map[string]map[WarningType]bool)
+
+	// Find workloads that this policy applies to (targets)
+	targetWorkloads := b.findMatchingWorkloads(policy.Namespace, policy.Spec.PodSelector, workloadsByNS)
+
+	// Initialize warnings map for target workloads
+	for _, targetW := range targetWorkloads {
+		wID := WorkloadID(targetW.Namespace, targetW.Name)
+		if warnings[wID] == nil {
+			warnings[wID] = make(map[WarningType]bool)
+		}
+	}
+
+	// Process ingress rules
+	for ruleIdx, ingressRule := range policy.Spec.Ingress {
+		// Check for warnings
+		hasNoPorts := len(ingressRule.Ports) == 0
+		hasNoSelector := len(ingressRule.From) == 0
+
+		// Find source workloads allowed by this rule
+		sourceWorkloads := b.findSourceWorkloads(policy.Namespace, ingressRule.From, workloadsByNS)
+
+		// For each target workload
+		for _, targetW := range targetWorkloads {
+			targetWID := WorkloadID(targetW.Namespace, targetW.Name)
+
+			// Add warnings for this workload
+			if hasNoPorts {
+				warnings[targetWID][WarningNoPorts] = true
+			}
+			if hasNoSelector {
+				warnings[targetWID][WarningNoSelector] = true
+			}
+
+			// Determine which ports are allowed
+			allowedPorts := b.getAllowedPorts(targetW, ingressRule.Ports)
+
+			// Create edges from each source to each allowed port
+			for _, sourceW := range sourceWorkloads {
+				sourceWID := WorkloadID(sourceW.Namespace, sourceW.Name)
+
+				// Don't create self-referencing edges
+				if sourceWID == targetWID {
+					continue
+				}
+
+				// Generate policy YAML once per policy (elide managedFields)
+				policyYAML := ""
+				policyCopy := policy.DeepCopy()
+				policyCopy.ManagedFields = nil
+				if yamlBytes, err := yaml.Marshal(policyCopy); err == nil {
+					policyYAML = string(yamlBytes)
+				}
+
+				for _, port := range allowedPorts {
+					protocol := string(port.Protocol)
+					if protocol == "" {
+						protocol = "TCP"
+					}
+					portID := PortID(targetWID, port.ContainerPort, protocol)
+
+					edge := Edge{
+						ID:         fmt.Sprintf("edge-%d", *edgeID),
+						Source:     sourceWID,
+						Target:     portID,
+						Label:      fmt.Sprintf("%s:%d", protocol, port.ContainerPort),
+						Rule:       b.formatK8sRule(ingressRule, ruleIdx),
+						Policy:     policy.Namespace + "/" + policy.Name,
+						PolicyYAML: policyYAML,
+						Metadata: map[string]string{
+							"policyType": "NetworkPolicy",
+							"ruleType":   "ingress",
+						},
+					}
+					edges = append(edges, edge)
+					*edgeID++
+				}
+			}
+		}
+	}
+
+	return edges, warnings
 }
 
 // processIstioAuthPolicy processes an Istio AuthorizationPolicy and returns edges.

@@ -436,6 +436,7 @@
         <div class="controls">
             <button class="btn" onclick="clearSelection()">Clear Selection</button>
             <button class="btn" id="hover-edges-btn" onclick="toggleHoverEdges()">Hover Edges: ON</button>
+            <button class="btn" id="warnings-btn" onclick="toggleWarnings()">Warnings: OFF</button>
             <button class="btn" onclick="resetView()">Reset View</button>
             <button class="btn" onclick="reLayout()">Re-Layout</button>
             <button class="btn btn-primary" onclick="exportPNG()">Export PNG</button>
@@ -722,6 +723,7 @@
     let searchTerm = '';
     let selectedNode = null; // Currently selected workload
     let showEdgesOnHover = true; // Toggle for hover edge preview
+    let showWarnings = false; // Toggle for showing warning icons
     
     let frameCount = 0;
     function draw() {
@@ -968,6 +970,31 @@
                 ctx.fillStyle = 'rgba(98, 106, 115, 0.9)';
                 ctx.textBaseline = 'top';
                 ctx.fillText(node.data.namespace || '', screen.x, screen.y - h/2 + 5 * zoom + fontSize + 2 * zoom);
+            }
+            
+            // Warning icon (when warnings toggle is on and node has warnings)
+            if (showWarnings && node.data.warnings && node.data.warnings.length > 0) {
+                const iconSize = 14 * zoom;
+                if (iconSize >= 6) {
+                    const iconX = screen.x + w/2 - iconSize - 4 * zoom;
+                    const iconY = screen.y - h/2 + 4 * zoom;
+                    
+                    // Yellow warning triangle
+                    ctx.beginPath();
+                    ctx.moveTo(iconX + iconSize/2, iconY);
+                    ctx.lineTo(iconX + iconSize, iconY + iconSize);
+                    ctx.lineTo(iconX, iconY + iconSize);
+                    ctx.closePath();
+                    ctx.fillStyle = '#ffcc00';
+                    ctx.fill();
+                    
+                    // Exclamation mark
+                    ctx.fillStyle = '#0a0e14';
+                    ctx.font = 'bold ' + (iconSize * 0.7) + 'px Outfit';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('!', iconX + iconSize/2, iconY + iconSize * 0.6);
+                }
             }
         });
         
@@ -1261,6 +1288,20 @@
             html += '<div class="tooltip-row"><span class="tooltip-label">Namespace</span><span class="tooltip-value">' + data.namespace + '</span></div>';
             html += '<div class="tooltip-row"><span class="tooltip-label">ID</span><span class="tooltip-value">' + data.id + '</span></div>';
             
+            // Show warnings if present
+            if (data.warnings && data.warnings.length > 0) {
+                html += '<div class="tooltip-row" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-color);"><span class="tooltip-label" style="color: #ffcc00;">⚠ Warnings</span></div>';
+                data.warnings.forEach(warning => {
+                    let warningText = warning;
+                    if (warning === 'no-ports') {
+                        warningText = 'Rule allows all ports (no port restriction)';
+                    } else if (warning === 'no-selector') {
+                        warningText = 'Rule allows from all sources (no selector)';
+                    }
+                    html += '<div class="tooltip-row" style="padding-left: 12px;"><span class="tooltip-value" style="font-size: 11px; color: #ffcc00;">' + warningText + '</span></div>';
+                });
+            }
+            
             if (data.metadata) {
                 const labels = Object.entries(data.metadata).slice(0, 3);
                 if (labels.length > 0) {
@@ -1535,6 +1576,11 @@
     function toggleHoverEdges() {
         showEdgesOnHover = !showEdgesOnHover;
         document.getElementById('hover-edges-btn').textContent = 'Hover Edges: ' + (showEdgesOnHover ? 'ON' : 'OFF');
+    }
+    
+    function toggleWarnings() {
+        showWarnings = !showWarnings;
+        document.getElementById('warnings-btn').textContent = 'Warnings: ' + (showWarnings ? 'ON' : 'OFF');
     }
     
     function resetView() {

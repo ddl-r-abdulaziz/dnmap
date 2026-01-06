@@ -11,18 +11,29 @@ const (
 	NodeTypePort     NodeType = "port"
 )
 
+// WarningType represents the type of policy warning.
+type WarningType string
+
+const (
+	// WarningNoPorts indicates a rule that allows all ports
+	WarningNoPorts WarningType = "no-ports"
+	// WarningNoSelector indicates a rule that allows from all sources (no pod/namespace selector)
+	WarningNoSelector WarningType = "no-selector"
+)
+
 // Node represents a node in the network graph.
 type Node struct {
 	ID          string            `json:"id"`
 	Label       string            `json:"label"`
 	Type        NodeType          `json:"type"`
 	Namespace   string            `json:"namespace"`
-	Kind        string            `json:"kind"` // For workload nodes: Deployment, StatefulSet, etc.
+	Kind        string            `json:"kind"`             // For workload nodes: Deployment, StatefulSet, etc.
 	Parent      string            `json:"parent,omitempty"` // For port nodes: the parent workload ID
 	Port        int32             `json:"port,omitempty"`
 	Protocol    string            `json:"protocol,omitempty"`
 	ServiceName string            `json:"serviceName,omitempty"` // For port nodes: the K8s Service name
 	ServicePort int32             `json:"servicePort,omitempty"` // For port nodes: the service port
+	Warnings    []WarningType     `json:"warnings,omitempty"`    // Policy warnings for this node
 	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
@@ -32,8 +43,8 @@ type Edge struct {
 	Source     string            `json:"source"` // Source node ID
 	Target     string            `json:"target"` // Target node ID (port node)
 	Label      string            `json:"label"`
-	Rule       string            `json:"rule"` // The network policy rule that allows this connection
-	Policy     string            `json:"policy"` // Name of the network policy
+	Rule       string            `json:"rule"`                 // The network policy rule that allows this connection
+	Policy     string            `json:"policy"`               // Name of the network policy
 	PolicyYAML string            `json:"policyYaml,omitempty"` // Full policy YAML
 	Metadata   map[string]string `json:"metadata,omitempty"`
 }
@@ -88,12 +99,12 @@ func NewPortNode(workloadID string, p k8s.Port) Node {
 	if protocol == "" {
 		protocol = "TCP"
 	}
-	
+
 	label := p.Name
 	if label == "" {
 		label = itoa(p.ContainerPort)
 	}
-	
+
 	return Node{
 		ID:          PortID(workloadID, p.ContainerPort, protocol),
 		Label:       label,
@@ -105,4 +116,3 @@ func NewPortNode(workloadID string, p k8s.Port) Node {
 		ServicePort: p.ServicePort,
 	}
 }
-
