@@ -472,7 +472,7 @@
     // Calculate workload height based on number of ports
     function updateWorkloadHeight(workloadNode, portCount) {
         const portsHeight = portCount * PORT_HEIGHT + (portCount - 1) * PORT_GAP;
-        workloadNode.height = WORKLOAD_HEADER_HEIGHT + Math.max(portsHeight, PORT_HEIGHT) + 8; // 8px padding bottom
+        workloadNode.height = WORKLOAD_HEADER_HEIGHT + 8 + Math.max(portsHeight, PORT_HEIGHT) + 8; // 8px padding top and bottom
     }
     
     // Helper to check if a number is finite
@@ -540,8 +540,8 @@
         
         const namespaces = Object.keys(byNamespace).sort();
         const serviceWidth = PORT_WIDTH * 3.5;
-        const nodeSpacing = WORKLOAD_WIDTH + serviceWidth + 40; // Account for service width on right
-        const namespaceGap = 80;
+        const nodeSpacing = WORKLOAD_WIDTH + serviceWidth; // Account for service width on right
+        const namespaceGap = 50;
         const nodesPerRow = Math.ceil(Math.sqrt(workloadNodes.length / namespaces.length)) + 2;
         
         let currentY = 0;
@@ -566,7 +566,7 @@
                     node.vy = 0;
                 });
                 
-                currentY += maxHeight + 40; // Move to next row
+                currentY += maxHeight + 20; // Move to next row
             });
             
             currentY += namespaceGap;
@@ -746,30 +746,6 @@
             });
         });
         
-        // Draw port-to-parent connections (workload right edge to port left edge)
-        portNodes.forEach(portNode => {
-            const parent = nodes.get(portNode.data.parent);
-            if (!parent) return;
-            if (!isFiniteNum(parent.x) || !isFiniteNum(parent.y)) return;
-            if (!isFiniteNum(portNode.x) || !isFiniteNum(portNode.y)) return;
-            
-            // Connect workload's right edge to port's left edge
-            const parentRightX = parent.x + WORKLOAD_WIDTH / 2;
-            const portLeftX = portNode.x - PORT_WIDTH / 2;
-            
-            const pScreen = worldToScreen(parentRightX, portNode.y);
-            const portScreen = worldToScreen(portLeftX, portNode.y);
-            
-            if (!isFiniteNum(pScreen.x) || !isFiniteNum(pScreen.y)) return;
-            if (!isFiniteNum(portScreen.x) || !isFiniteNum(portScreen.y)) return;
-            
-            ctx.beginPath();
-            ctx.moveTo(pScreen.x, pScreen.y);
-            ctx.lineTo(portScreen.x, portScreen.y);
-            ctx.strokeStyle = 'rgba(57, 186, 230, 0.3)';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-        });
         
         // Draw workload nodes (rectangles with dynamic height)
         workloadNodes.forEach(node => {
@@ -1162,7 +1138,8 @@
         
         updateWorkloadHeight(workloadNode, portCount);
         
-        const startY = workloadNode.y - workloadNode.height / 2 + WORKLOAD_HEADER_HEIGHT + PORT_HEIGHT / 2;
+        // Start ports a bit below the header rule (add 8px padding)
+        const startY = workloadNode.y - workloadNode.height / 2 + WORKLOAD_HEADER_HEIGHT + 8 + PORT_HEIGHT / 2;
         
         // Right alignment point: workload right edge + 50% of port width
         const rightAlignX = workloadNode.x + WORKLOAD_WIDTH / 2 + PORT_WIDTH * 0.5;
