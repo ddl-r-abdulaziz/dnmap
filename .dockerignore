@@ -1,0 +1,23 @@
+# Build artifacts
+bin/
+coverage.out
+coverage.html
+network-map.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+

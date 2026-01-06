@@ -1,6 +1,6 @@
 module github.com/ddl-r-abdulaziz/dnmap
 
-go 1.25.4
+go 1.25.0
 
 require (
 	istio.io/api v1.28.2

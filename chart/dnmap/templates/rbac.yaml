@@ -1,0 +1,40 @@
+{{- if .Values.serviceAccount.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dnmap.fullname" . }}
+  labels:
+    {{- include "dnmap.labels" . | nindent 4 }}
+rules:
+  # Read workloads
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["get", "list", "watch"]
+  # Read network policies
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  # Read Istio authorization policies
+  - apiGroups: ["security.istio.io"]
+    resources: ["authorizationpolicies"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dnmap.fullname" . }}
+  labels:
+    {{- include "dnmap.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "dnmap.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dnmap.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+

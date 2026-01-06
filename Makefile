@@ -6,6 +6,12 @@ TMPL_FILES := $(shell find . -type f -name '*.tmpl')
 BINARY_NAME := dnmap
 BUILD_DIR := bin
 
+# Image parameters
+IMAGE_REGISTRY ?= quay.io
+IMAGE_REPO ?= domino/dnmap
+IMAGE_TAG ?= dev
+IMAGE := $(IMAGE_REGISTRY)/$(IMAGE_REPO):$(IMAGE_TAG)
+
 # Tool versions
 GOLANGCI_LINT_VERSION ?= v1.61.0
 
@@ -56,6 +62,45 @@ fmt: ## Format Go source files
 .PHONY: vet
 vet: ## Run go vet
 	go vet ./...
+
+##@ Container Image
+
+PLATFORMS ?= linux/amd64,linux/arm64
+
+.PHONY: image-build
+image-build: ## Build container image (local platform only)
+	docker build -t $(IMAGE) .
+
+.PHONY: image-push
+image-push: ## Push container image to registry
+	docker push $(IMAGE)
+
+.PHONY: image-buildx
+image-buildx: ## Build and push multi-arch container image
+	docker buildx build --platform $(PLATFORMS) -t $(IMAGE) --push .
+
+.PHONY: image-publish
+image-publish: image-buildx ## Build and push multi-arch container image
+
+##@ Deployment
+
+HELM_RELEASE ?= dnmap
+HELM_NAMESPACE ?= domino-platform
+
+.PHONY: deploy
+deploy: ## Deploy to current Kubernetes cluster using Helm
+	helm upgrade --install $(HELM_RELEASE) ./chart/dnmap \
+		--namespace $(HELM_NAMESPACE) \
+		--create-namespace \
+		--set image.repository=$(IMAGE_REGISTRY)/$(IMAGE_REPO) \
+		--set image.tag=$(IMAGE_TAG)
+
+.PHONY: undeploy
+undeploy: ## Remove deployment from Kubernetes cluster
+	helm uninstall $(HELM_RELEASE) --namespace $(HELM_NAMESPACE)
+
+.PHONY: publish
+publish: image-publish deploy ## Build, push image, and deploy to cluster
 
 ##@ Dependencies
 

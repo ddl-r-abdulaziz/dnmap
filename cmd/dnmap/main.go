@@ -4,7 +4,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/ddl-r-abdulaziz/dnmap/pkg/graph"
 	"github.com/ddl-r-abdulaziz/dnmap/pkg/k8s"
@@ -19,6 +22,9 @@ func main() {
 	var kubeconfig string
 	var outputFile string
 	var namespaces string
+	var serve bool
+	var port string
+	var refreshInterval time.Duration
 
 	// Set up flags
 	// Don't set a default kubeconfig path - let the client use standard kubectl loading rules
@@ -26,6 +32,9 @@ func main() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "path to the kubeconfig file (default: uses KUBECONFIG env or ~/.kube/config)")
 	flag.StringVar(&outputFile, "output", defaultOutputFile, "output HTML file path")
 	flag.StringVar(&namespaces, "namespaces", "domino-compute,domino-platform", "comma-separated list of namespaces to scan")
+	flag.BoolVar(&serve, "serve", false, "serve the generated HTML via HTTP")
+	flag.StringVar(&port, "port", "8080", "HTTP server port (when --serve is enabled)")
+	flag.DurationVar(&refreshInterval, "refresh", 5*time.Minute, "refresh interval for regenerating the map (when --serve is enabled)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "dnmap - Domino Network Map\n\n")
@@ -38,13 +47,13 @@ func main() {
 
 	flag.Parse()
 
-	if err := run(kubeconfig, outputFile, namespaces); err != nil {
+	if err := run(kubeconfig, outputFile, namespaces, serve, port, refreshInterval); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(kubeconfig, outputFile, namespaces string) error {
+func run(kubeconfig, outputFile, namespaces string, serve bool, port string, refreshInterval time.Duration) error {
 	// Create Kubernetes client
 	client, err := k8s.NewClient(kubeconfig)
 	if err != nil {
@@ -54,6 +63,52 @@ func run(kubeconfig, outputFile, namespaces string) error {
 	// Parse namespaces
 	nsList := k8s.ParseNamespaces(namespaces)
 
+	// Generate the initial map
+	if err := generateMap(client, nsList, outputFile); err != nil {
+		return err
+	}
+
+	// If not serving, we're done
+	if !serve {
+		return nil
+	}
+
+	// Start background refresh
+	go func() {
+		ticker := time.NewTicker(refreshInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			fmt.Printf("Refreshing network map...\n")
+			if err := generateMap(client, nsList, outputFile); err != nil {
+				fmt.Fprintf(os.Stderr, "Error refreshing map: %v\n", err)
+			}
+		}
+	}()
+
+	// Serve the HTML file
+	dir := filepath.Dir(outputFile)
+	file := filepath.Base(outputFile)
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || r.URL.Path == "/"+file {
+			http.ServeFile(w, r, outputFile)
+		} else {
+			http.NotFound(w, r)
+		}
+	})
+
+	// Health check endpoint
+	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+
+	fmt.Printf("Serving network map at http://0.0.0.0:%s/ (refresh every %v)\n", port, refreshInterval)
+	fmt.Printf("Serving from directory: %s\n", dir)
+	return http.ListenAndServe(":"+port, nil)
+}
+
+func generateMap(client *k8s.Client, nsList []string, outputFile string) error {
 	// Fetch workloads and policies
 	fmt.Printf("Scanning namespaces: %v\n", nsList)
 

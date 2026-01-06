@@ -1,0 +1,59 @@
+# Default values for dnmap
+
+replicaCount: 1
+
+image:
+  repository: quay.io/domino/dnmap
+  tag: dev
+  pullPolicy: Always
+
+imagePullSecrets:
+  - name: domino-quay-repos
+
+# Namespaces to scan for workloads and policies
+namespaces: "domino-compute,domino-platform"
+
+# Output file path (inside the container)
+outputPath: /data/network-map.html
+
+serviceAccount:
+  # Create a service account
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use
+  name: ""
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+# Container security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  readOnlyRootFilesystem: true
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+
+# Resource limits
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
