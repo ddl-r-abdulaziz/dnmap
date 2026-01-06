@@ -784,24 +784,44 @@
             const headerH = WORKLOAD_HEADER_HEIGHT * zoom;
             const color = colors[node.data.kind] || colors.Deployment;
             
-            // Glow effect for selected, hovered, or search match
-            if (isSelected || isHovered || isSearchMatch) {
+            // Glow effect for selected or hovered
+            if (isSelected || isHovered) {
                 ctx.shadowColor = color;
                 ctx.shadowBlur = 20;
+            }
+            
+            // Search match: bright yellow glow
+            if (isSearchMatch) {
+                ctx.shadowColor = '#ffcc00';
+                ctx.shadowBlur = 30;
             }
             
             // Workload body
             ctx.beginPath();
             roundRect(ctx, screen.x - w/2, screen.y - h/2, w, h, 6 * zoom);
             
-            const fillGradient = ctx.createLinearGradient(screen.x - w/2, screen.y - h/2, screen.x + w/2, screen.y + h/2);
-            fillGradient.addColorStop(0, color + '20');
-            fillGradient.addColorStop(1, color + '08');
-            ctx.fillStyle = fillGradient;
+            // Search match gets a highlighted background
+            if (isSearchMatch) {
+                const fillGradient = ctx.createLinearGradient(screen.x - w/2, screen.y - h/2, screen.x + w/2, screen.y + h/2);
+                fillGradient.addColorStop(0, '#ffcc0040');
+                fillGradient.addColorStop(1, '#ffcc0020');
+                ctx.fillStyle = fillGradient;
+            } else {
+                const fillGradient = ctx.createLinearGradient(screen.x - w/2, screen.y - h/2, screen.x + w/2, screen.y + h/2);
+                fillGradient.addColorStop(0, color + '20');
+                fillGradient.addColorStop(1, color + '08');
+                ctx.fillStyle = fillGradient;
+            }
             ctx.fill();
             
-            ctx.strokeStyle = (isSelected || isHovered) ? color : color + '80';
-            ctx.lineWidth = isSelected ? 3 : (isHovered ? 2 : 1);
+            // Border - yellow for search match
+            if (isSearchMatch) {
+                ctx.strokeStyle = '#ffcc00';
+                ctx.lineWidth = 3;
+            } else {
+                ctx.strokeStyle = (isSelected || isHovered) ? color : color + '80';
+                ctx.lineWidth = isSelected ? 3 : (isHovered ? 2 : 1);
+            }
             ctx.stroke();
             
             // Header separator line
