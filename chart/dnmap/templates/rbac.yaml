@@ -6,6 +6,10 @@ metadata:
   labels:
     {{- include "dnmap.labels" . | nindent 4 }}
 rules:
+  # Read namespaces for label-based namespace selector matching
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
   # Read workloads
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]

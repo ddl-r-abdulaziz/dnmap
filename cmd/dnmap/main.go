@@ -112,6 +112,12 @@ func generateMap(client *k8s.Client, nsList []string, outputFile string) error {
 	// Fetch workloads and policies
 	fmt.Printf("Scanning namespaces: %v\n", nsList)
 
+	// Get namespace labels for proper namespace selector matching
+	namespaceInfos, err := client.GetNamespaces(nsList)
+	if err != nil {
+		return fmt.Errorf("failed to get namespace info: %w", err)
+	}
+
 	workloads, err := client.GetWorkloads(nsList)
 	if err != nil {
 		return fmt.Errorf("failed to get workloads: %w", err)
@@ -135,8 +141,8 @@ func generateMap(client *k8s.Client, nsList []string, outputFile string) error {
 	}
 	fmt.Printf("Found %d K8s NetworkPolicies, %d Istio AuthorizationPolicies\n", k8sPolicies, istioPolicies)
 
-	// Build the graph
-	builder := graph.NewBuilder()
+	// Build the graph with namespace labels for proper namespace selector evaluation
+	builder := graph.NewBuilder().WithNamespaceLabels(namespaceInfos)
 	networkGraph := builder.Build(workloads, policies)
 	fmt.Printf("Generated graph with %d nodes and %d edges\n", len(networkGraph.Nodes), len(networkGraph.Edges))
 

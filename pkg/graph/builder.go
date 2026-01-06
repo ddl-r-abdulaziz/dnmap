@@ -11,11 +11,23 @@ import (
 )
 
 // Builder constructs network graphs from Kubernetes resources.
-type Builder struct{}
+type Builder struct {
+	namespaceLabels map[string]map[string]string // namespace name -> labels
+}
 
 // NewBuilder creates a new graph builder.
 func NewBuilder() *Builder {
-	return &Builder{}
+	return &Builder{
+		namespaceLabels: make(map[string]map[string]string),
+	}
+}
+
+// WithNamespaceLabels sets the namespace labels for proper namespace selector matching.
+func (b *Builder) WithNamespaceLabels(namespaces []k8s.NamespaceInfo) *Builder {
+	for _, ns := range namespaces {
+		b.namespaceLabels[ns.Name] = ns.Labels
+	}
+	return b
 }
 
 // Build constructs a NetworkGraph from workloads and policies.
@@ -490,13 +502,65 @@ func (b *Builder) getNamespacesForPeer(policyNamespace string, peer networkingv1
 		return namespaces
 	}
 
-	// For simplicity, we check all namespaces we know about
-	// In a real implementation, we would query namespace labels
-	namespaces := make([]string, 0, len(workloadsByNS))
+	// Filter namespaces by their labels matching the selector
+	var namespaces []string
 	for ns := range workloadsByNS {
-		namespaces = append(namespaces, ns)
+		nsLabels := b.namespaceLabels[ns]
+		if b.namespaceMatchesSelector(nsLabels, *peer.NamespaceSelector) {
+			namespaces = append(namespaces, ns)
+		}
 	}
 	return namespaces
+}
+
+// namespaceMatchesSelector checks if namespace labels match the given LabelSelector.
+func (b *Builder) namespaceMatchesSelector(nsLabels map[string]string, selector metav1.LabelSelector) bool {
+	// Check MatchLabels
+	for key, value := range selector.MatchLabels {
+		if nsLabels[key] != value {
+			return false
+		}
+	}
+
+	// Check MatchExpressions
+	for _, expr := range selector.MatchExpressions {
+		labelValue, hasLabel := nsLabels[expr.Key]
+
+		switch expr.Operator {
+		case metav1.LabelSelectorOpIn:
+			if !hasLabel {
+				return false
+			}
+			found := false
+			for _, v := range expr.Values {
+				if labelValue == v {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		case metav1.LabelSelectorOpNotIn:
+			if hasLabel {
+				for _, v := range expr.Values {
+					if labelValue == v {
+						return false
+					}
+				}
+			}
+		case metav1.LabelSelectorOpExists:
+			if !hasLabel {
+				return false
+			}
+		case metav1.LabelSelectorOpDoesNotExist:
+			if hasLabel {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 // matchesSelector checks if labels match a LabelSelector.
@@ -639,6 +703,9 @@ func (b *Builder) formatPeer(peer networkingv1.NetworkPolicyPeer) string {
 		} else {
 			parts = append(parts, fmt.Sprintf("namespaces: %v", peer.NamespaceSelector.MatchLabels))
 		}
+	} else if peer.PodSelector != nil {
+		// No namespace selector with a pod selector means same namespace as the policy
+		parts = append(parts, "namespaces: same as policy")
 	}
 
 	if peer.IPBlock != nil {

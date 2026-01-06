@@ -53,7 +53,7 @@ type Workload struct {
 type PolicyType string
 
 const (
-	PolicyTypeK8sNetworkPolicy      PolicyType = "NetworkPolicy"
+	PolicyTypeK8sNetworkPolicy         PolicyType = "NetworkPolicy"
 	PolicyTypeIstioAuthorizationPolicy PolicyType = "AuthorizationPolicy"
 )
 
@@ -286,6 +286,31 @@ func (c *Client) GetPolicies(namespaces []string) ([]Policy, error) {
 	}
 
 	return policies, nil
+}
+
+// NamespaceInfo holds metadata about a namespace.
+type NamespaceInfo struct {
+	Name   string
+	Labels map[string]string
+}
+
+// GetNamespaces fetches namespace metadata for the specified namespaces.
+func (c *Client) GetNamespaces(namespaces []string) ([]NamespaceInfo, error) {
+	ctx := context.Background()
+	var result []NamespaceInfo
+
+	for _, ns := range namespaces {
+		namespace, err := c.k8sClientset.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get namespace %s: %w", ns, err)
+		}
+		result = append(result, NamespaceInfo{
+			Name:   namespace.Name,
+			Labels: namespace.Labels,
+		})
+	}
+
+	return result, nil
 }
 
 // GetNetworkPolicies fetches K8s NetworkPolicies from the specified namespaces.
