@@ -1,5 +1,19 @@
 # dnmap - Domino Network Map
 
+
+Just deploy it on your cluster
+
+* Point your kubectx at your desired clustert
+* Deploy the app
+    ```
+    make deploy
+    ```
+* visit https://<your-custer>/dnmap
+
+
+---- 
+# lots of lies below here
+
 A CLI tool that generates an interactive visualization of workloads and network policies in your Kubernetes cluster. Supports both Kubernetes NetworkPolicies and Istio AuthorizationPolicies.
 
 ## Features
