@@ -3,7 +3,7 @@
 
 Just deploy it on your cluster
 
-* Point your kubectx at your desired clustert
+* Point your kubectx at your desired cluster
 * Deploy the app
     ```
     make deploy
