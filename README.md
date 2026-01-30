@@ -8,7 +8,7 @@ Just deploy it on your cluster
     ```
     make deploy
     ```
-* visit https://<your-custer>/dnmap
+* visit `https://<your-custer>/dnmap`
 
 
 ---- 
